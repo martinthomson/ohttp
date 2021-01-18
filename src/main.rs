@@ -224,10 +224,12 @@ impl FieldSection {
         if let Some(te) = self.get(TRANSFER_ENCODING) {
             let mut slc = te;
             while let Some(i) = index_of(COMMA, slc) {
-                slc = trim_ows(&slc[i+1..]);
+                slc = trim_ows(&slc[i + 1..]);
             }
             slc == CHUNKED
-        } else { false }
+        } else {
+            false
+        }
     }
 
     fn parse_line(&mut self, line: Vec<u8>) {
