@@ -12,17 +12,21 @@ jobs:
         with:
           toolchain: stable
       - uses: actions-rs/cargo@v1
+        name: Check formatting
         with:
           command: fmt
           args: --all -- --check
       - uses: actions-rs/cargo@v1
+        name: Build
         with:
           command: build
           args: --tests
       - uses: actions-rs/cargo@v1
+        name: Run tests
         with:
           command: test
       - uses: actions-rs/cargo@v1
+        name: Clippy
         with:
           command: clippy
           args: --tests -- -D warnings
