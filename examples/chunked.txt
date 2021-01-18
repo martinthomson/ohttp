@@ -5,8 +5,9 @@ Transfer-Encoding: camel, chunked
 This
 6
  conte
-12;chunk-extension=foo
-nt is for testing.
+13;chunk-extension=foo
+nt contains CRLF.
+
 0
 Trailer: text
 

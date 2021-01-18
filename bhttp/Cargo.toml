@@ -1,0 +1,17 @@
+[package]
+name = "bhttp"
+version = "0.1.0"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+edition = "2018"
+
+[dependencies]
+url = "2.2.0"
+
+[features]
+default = ["bhttp"]
+bhttp = ["read-bhttp", "write-bhttp"]
+http = ["read-http", "write-http"]
+read-bhttp = []
+write-bhttp = []
+read-http = []
+write-http = []
