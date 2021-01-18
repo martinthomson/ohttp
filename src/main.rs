@@ -430,7 +430,6 @@ impl Message {
                 let _ = line.split_off(i);
             }
             let count_str = String::from_utf8(line).expect("invalid chunked encoding");
-            println!("chunk line: >>{}<<", count_str);
             let count = usize::from_str_radix(&count_str, 16).unwrap();
             if count == 0 {
                 return Ok(content);
