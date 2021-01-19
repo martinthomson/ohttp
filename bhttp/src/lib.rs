@@ -1,9 +1,5 @@
-//
-// License CC0: https://creativecommons.org/publicdomain/zero/1.0/
-//
-
 #![deny(clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)] // Too lazy to document.
+#![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
 use std::convert::TryFrom;
 use std::io;

@@ -1,7 +1,3 @@
-//
-// License CC0: https://creativecommons.org/publicdomain/zero/1.0/
-//
-
 #![deny(clippy::pedantic)]
 
 use bhttp::{Message, Mode};

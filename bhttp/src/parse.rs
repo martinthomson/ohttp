@@ -1,7 +1,3 @@
-//
-// License CC0: https://creativecommons.org/publicdomain/zero/1.0/
-//
-
 use crate::{Error, Res};
 
 pub const HTAB: u8 = 0x09;

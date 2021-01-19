@@ -1,7 +1,3 @@
-//
-// License CC0: https://creativecommons.org/publicdomain/zero/1.0/
-//
-
 use crate::err::Res;
 use std::convert::TryFrom;
 use std::io;
