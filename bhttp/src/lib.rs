@@ -9,14 +9,16 @@ use std::convert::TryFrom;
 use std::io;
 use url::Url;
 
-const HTAB: u8 = 0x09;
-const NL: u8 = 0x0a;
-const CR: u8 = 0x0d;
-const SP: u8 = 0x20;
-const COMMA: u8 = 0x2c;
-const SLASH: u8 = 0x2f;
-const COLON: u8 = 0x3a;
-const SEMICOLON: u8 = 0x3b;
+mod err;
+mod parse;
+mod rw;
+
+pub use err::Error;
+use err::Res;
+use parse::{
+    downcase, index_of, is_ows, read_line, split_at, trim_ows, COLON, COMMA, SEMICOLON, SLASH, SP,
+};
+use rw::{read_varint, read_vec, write_len, write_varint, write_vec};
 
 const CONTENT_LENGTH: &[u8] = b"content-length";
 const COOKIE: &[u8] = b"cookie";
@@ -33,187 +35,6 @@ pub enum Mode {
     Indefinite,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    /// A field contained invalid Unicode.
-    CharacterEncoding(std::string::FromUtf8Error),
-    /// A field contained an integer value that was out of range.
-    IntRange(std::num::TryFromIntError),
-    /// An IO error.
-    Io(io::Error),
-    /// A field or line was missing a necessary character.
-    Missing(u8),
-    /// A URL was missing a key component.
-    MissingUrlComponent,
-    /// An obs-fold line was the first line of a field section.
-    ObsFold,
-    /// A field contained a non-integer value.
-    ParseInt(std::num::ParseIntError),
-    /// A URL could not be parsed into components.
-    UrlParse(url::ParseError),
-}
-
-macro_rules! forward_errors {
-    {$($t:path => $v:ident),* $(,)?} => {
-        $(
-            impl From<$t> for Error {
-                fn from(e: $t) -> Self {
-                    Self::$v(e)
-                }
-            }
-        )*
-
-        impl std::error::Error for Error {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                match self {
-                    $( Self::$v(e) => Some(e), )*
-                    _ => None,
-                }
-            }
-        }
-    };
-}
-
-forward_errors! {
-    io::Error => Io,
-    std::string::FromUtf8Error => CharacterEncoding,
-    std::num::ParseIntError => ParseInt,
-    std::num::TryFromIntError => IntRange,
-    url::ParseError => UrlParse,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
-    }
-}
-
-type Res<T> = Result<T, Error>;
-
-#[cfg(feature = "write-bhttp")]
-#[allow(clippy::cast_possible_truncation)]
-fn write_uint(v: impl Into<u64>, n: u8, w: &mut impl io::Write) -> Res<()> {
-    let v = v.into();
-    assert!(n > 0 && usize::from(n) < std::mem::size_of::<u64>());
-    for i in 0..n {
-        w.write_all(&[((v >> (8 * (n - i - 1))) & 0xff) as u8])?;
-    }
-    Ok(())
-}
-
-#[cfg(feature = "write-bhttp")]
-fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
-    let v = v.into();
-    match () {
-        _ if v < (1 << 6) => write_uint(v, 1, w),
-        _ if v < (1 << 14) => write_uint(v | (1 << 14), 2, w),
-        _ if v < (1 << 30) => write_uint(v | (2 << 30), 4, w),
-        _ if v < (1 << 62) => write_uint(v | (3 << 62), 8, w),
-        _ => panic!("Varint value too large"),
-    }
-}
-
-#[cfg(feature = "write-bhttp")]
-fn write_len(len: usize, w: &mut impl io::Write) -> Res<()> {
-    write_varint(u64::try_from(len).unwrap(), w)
-}
-
-#[cfg(feature = "write-bhttp")]
-fn write_vec(v: &[u8], w: &mut impl io::Write) -> Res<()> {
-    write_varint(u64::try_from(v.len()).unwrap(), w)?;
-    w.write_all(v)?;
-    Ok(())
-}
-
-#[cfg(feature = "read-bhttp")]
-fn read_varint(r: &mut impl io::BufRead) -> Res<u64> {
-    fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<u64> {
-        let mut buf = [0; 7];
-        let count = r.read(&mut buf[..n])?;
-        assert_eq!(count, n, "truncated varint");
-        let mut v = 0;
-        for i in &buf[..n] {
-            v = (v << 8) | u64::from(*i);
-        }
-        Ok(v)
-    }
-
-    let b1 = read_uint(1, r)?;
-    Ok(match b1 >> 6 {
-        0 => b1 & 0x3f,
-        1 => ((b1 & 0x3f) << 8) | read_uint(1, r)?,
-        2 => ((b1 & 0x3f) << 24) | read_uint(3, r)?,
-        3 => ((b1 & 0x3f) << 56) | read_uint(7, r)?,
-        _ => unreachable!(),
-    })
-}
-
-#[cfg(feature = "read-bhttp")]
-fn read_vec(r: &mut impl io::BufRead) -> Res<Vec<u8>> {
-    let len = read_varint(r)?;
-    let mut v = vec![0; usize::try_from(len).unwrap()];
-    r.read_exact(&mut v)?;
-    Ok(v)
-}
-
-#[cfg(feature = "read-http")]
-fn is_ows(x: u8) -> bool {
-    x == SP || x == HTAB
-}
-
-#[cfg(feature = "read-http")]
-fn trim_ows(v: &[u8]) -> &[u8] {
-    for s in 0..v.len() {
-        if !is_ows(v[s]) {
-            for e in (s..v.len()).rev() {
-                if !is_ows(v[e]) {
-                    return &v[s..=e];
-                }
-            }
-        }
-    }
-    &v[..0]
-}
-
-#[cfg(feature = "read-http")]
-fn downcase(n: &mut [u8]) {
-    for i in n {
-        if *i >= 0x41 && *i <= 0x5a {
-            *i += 0x20;
-        }
-    }
-}
-
-fn index_of(v: u8, line: &[u8]) -> Option<usize> {
-    for (i, x) in line.iter().enumerate() {
-        if *x == v {
-            return Some(i);
-        }
-    }
-    None
-}
-
-#[cfg(feature = "read-http")]
-fn split_at(v: u8, mut line: Vec<u8>) -> Option<(Vec<u8>, Vec<u8>)> {
-    index_of(v, &line).map(|i| {
-        let tail = line.split_off(i + 1);
-        let _ = line.pop();
-        (line, tail)
-    })
-}
-
-#[cfg(feature = "read-http")]
-fn read_line(r: &mut impl io::BufRead) -> Res<Vec<u8>> {
-    let mut buf = Vec::new();
-    r.read_until(NL, &mut buf)?;
-    assert_eq!(buf.pop().unwrap(), NL); // TODO (deal with EOF)
-    if buf.pop().ok_or(Error::Missing(CR))? == CR {
-        Ok(buf)
-    } else {
-        Err(Error::Missing(CR))
-    }
-}
-
 pub struct Field {
     name: Vec<u8>,
     value: Vec<u8>,
@@ -223,6 +44,16 @@ impl Field {
     #[must_use]
     pub fn new(name: Vec<u8>, value: Vec<u8>) -> Self {
         Self { name, value }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &[u8] {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn value(&self) -> &[u8] {
+        &self.value
     }
 
     #[cfg(feature = "write-http")]
@@ -264,6 +95,11 @@ impl FieldSection {
             }
         }
         None
+    }
+
+    #[must_use]
+    pub fn fields(&self) -> &[Field] {
+        &self.0
     }
 
     #[must_use]
@@ -369,12 +205,44 @@ impl FieldSection {
     }
 }
 
-enum ControlData {
+pub enum ControlData {
     Request { method: Vec<u8>, url: Vec<u8> },
     Response(StatusCode),
 }
 
 impl ControlData {
+    #[must_use]
+    pub fn is_request(&self) -> bool {
+        matches!(self, Self::Request{ .. })
+    }
+
+    #[must_use]
+    pub fn method(&self) -> Option<&[u8]> {
+        if let Self::Request { method, .. } = self {
+            Some(method)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn url(&self) -> Option<&[u8]> {
+        if let Self::Request { url, .. } = self {
+            Some(url)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn status(&self) -> Option<StatusCode> {
+        if let Self::Response(code) = self {
+            Some(*code)
+        } else {
+            None
+        }
+    }
+
     #[cfg(feature = "read-http")]
     pub fn read_http(line: Vec<u8>) -> Res<Self> {
         //  request-line = method SP request-target SP HTTP-version
@@ -412,14 +280,16 @@ impl ControlData {
     }
 
     /// If this is an informational response.
-    pub fn informational(&self) -> Option<StatusCode> {
+    #[must_use]
+    fn informational(&self) -> Option<StatusCode> {
         match self {
             Self::Response(v) if *v >= 100 && *v < 200 => Some(*v),
             _ => None,
         }
     }
 
-    pub fn code(&self, mode: Mode) -> u64 {
+    #[must_use]
+    fn code(&self, mode: Mode) -> u64 {
         match (self, mode) {
             (Self::Request { .. }, Mode::Known) => 0,
             (Self::Request { .. }, Mode::Indefinite) => 1,
@@ -488,8 +358,36 @@ impl ControlData {
     }
 }
 
+pub struct InformationalResponse {
+    status: StatusCode,
+    fields: FieldSection,
+}
+
+impl InformationalResponse {
+    #[must_use]
+    pub fn new(status: StatusCode, fields: FieldSection) -> Self {
+        Self { status, fields }
+    }
+
+    #[must_use]
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    #[must_use]
+    pub fn fields(&self) -> &FieldSection {
+        &self.fields
+    }
+
+    fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
+        write_varint(self.status, w)?;
+        self.fields.write_bhttp(mode, w)?;
+        Ok(())
+    }
+}
+
 pub struct Message {
-    informational: Vec<(StatusCode, FieldSection)>,
+    informational: Vec<InformationalResponse>,
     control: ControlData,
     header: FieldSection,
     content: Vec<u8>,
@@ -497,6 +395,31 @@ pub struct Message {
 }
 
 impl Message {
+    #[must_use]
+    pub fn informational(&self) -> &[InformationalResponse] {
+        &self.informational
+    }
+
+    #[must_use]
+    pub fn control(&self) -> &ControlData {
+        &self.control
+    }
+
+    #[must_use]
+    pub fn header(&self) -> &FieldSection {
+        &self.header
+    }
+
+    #[must_use]
+    pub fn content(&self) -> &[u8] {
+        &self.content
+    }
+
+    #[must_use]
+    pub fn trailer(&self) -> &FieldSection {
+        &self.trailer
+    }
+
     #[cfg(feature = "read-http")]
     fn read_chunked(r: &mut impl io::BufRead) -> Res<Vec<u8>> {
         let mut content = Vec::new();
@@ -524,14 +447,18 @@ impl Message {
         let mut informational = Vec::new();
         while let Some(status) = control.informational() {
             let fields = FieldSection::read_http(r)?;
-            informational.push((status, fields));
+            informational.push(InformationalResponse::new(status, fields));
             let line = read_line(r)?;
             control = ControlData::read_http(line)?;
         }
 
         let header = FieldSection::read_http(r)?;
 
-        let (content, trailer) = if header.is_chunked() {
+        let (content, trailer) = if matches!(control.status(), Some(204) | Some(304)) {
+            // 204 and 304 have no body, no matter what Content-Length says.
+            // Unfortunately, we can't do the same for responses to HEAD.
+            (Vec::new(), FieldSection::default())
+        } else if header.is_chunked() {
             let content = Self::read_chunked(r)?;
             let trailer = FieldSection::read_http(r)?;
             (content, trailer)
@@ -561,8 +488,8 @@ impl Message {
     #[cfg(feature = "write-http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         for info in &self.informational {
-            ControlData::Response(info.0).write_http(w)?;
-            info.1.write_http(w)?;
+            ControlData::Response(info.status()).write_http(w)?;
+            info.fields().write_http(w)?;
         }
         self.control.write_http(w)?;
         let need_chunked = !self.trailer.is_empty() && !self.header.is_chunked();
@@ -595,7 +522,7 @@ impl Message {
         let mut informational = Vec::new();
         while let Some(status) = control.informational() {
             let fields = FieldSection::read_bhttp(mode, r)?;
-            informational.push((status, fields));
+            informational.push(InformationalResponse::new(status, fields));
             control = ControlData::read_bhttp(request, r)?;
         }
         let header = FieldSection::read_bhttp(mode, r)?;
@@ -626,8 +553,7 @@ impl Message {
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         write_varint(self.control.code(mode), w)?;
         for info in &self.informational {
-            write_varint(info.0, w)?;
-            info.1.write_bhttp(mode, w)?;
+            info.write_bhttp(mode, w)?;
         }
         self.control.write_bhttp(self.header.get(HOST), w)?;
         self.header.write_bhttp(mode, w)?;
