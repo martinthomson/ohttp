@@ -1,20 +1,24 @@
+#[cfg(feature = "read-http")]
 use crate::{Error, Res};
 
 pub const HTAB: u8 = 0x09;
+#[cfg(feature = "read-http")]
 pub const NL: u8 = 0x0a;
+#[cfg(feature = "read-http")]
 pub const CR: u8 = 0x0d;
 pub const SP: u8 = 0x20;
 pub const COMMA: u8 = 0x2c;
+#[cfg(feature = "read-http")]
 pub const SLASH: u8 = 0x2f;
+#[cfg(feature = "read-http")]
 pub const COLON: u8 = 0x3a;
+#[cfg(feature = "read-http")]
 pub const SEMICOLON: u8 = 0x3b;
 
-#[cfg(feature = "read-http")]
 pub fn is_ows(x: u8) -> bool {
     x == SP || x == HTAB
 }
 
-#[cfg(feature = "read-http")]
 pub fn trim_ows(v: &[u8]) -> &[u8] {
     for s in 0..v.len() {
         if !is_ows(v[s]) {

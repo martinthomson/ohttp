@@ -14,6 +14,8 @@ pub enum Error {
     ObsFold,
     /// A field contained a non-integer value.
     ParseInt(std::num::ParseIntError),
+    /// A field was truncated.
+    Truncated,
     /// A URL could not be parsed into components.
     UrlParse(url::ParseError),
 }

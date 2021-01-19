@@ -1,23 +1,32 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
+#[cfg(feature = "read-bhttp")]
 use std::convert::TryFrom;
 use std::io;
+#[cfg(feature = "write-bhttp")]
 use url::Url;
 
 mod err;
 mod parse;
+#[cfg(any(feature = "read-bhttp", feature = "write-bhttp"))]
 mod rw;
 
 pub use err::Error;
 use err::Res;
-use parse::{
-    downcase, index_of, is_ows, read_line, split_at, trim_ows, COLON, COMMA, SEMICOLON, SLASH, SP,
-};
-use rw::{read_varint, read_vec, write_len, write_varint, write_vec};
+#[cfg(feature = "read-http")]
+use parse::{downcase, is_ows, read_line, split_at, COLON, SEMICOLON, SLASH, SP};
+use parse::{index_of, trim_ows, COMMA};
+#[cfg(feature = "read-bhttp")]
+use rw::{read_varint, read_vec};
+#[cfg(feature = "write-bhttp")]
+use rw::{write_len, write_varint, write_vec};
 
+#[cfg(feature = "read-http")]
 const CONTENT_LENGTH: &[u8] = b"content-length";
+#[cfg(feature = "read-bhttp")]
 const COOKIE: &[u8] = b"cookie";
+#[cfg(feature = "write-bhttp")]
 const HOST: &[u8] = b"host";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
@@ -25,7 +34,7 @@ const CHUNKED: &[u8] = b"chunked";
 pub type StatusCode = u16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(feature = "write-bhttp")]
+#[cfg(any(feature = "read-bhttp", feature = "write-bhttp"))]
 pub enum Mode {
     KnownLength,
     IndefiniteLength,
@@ -68,6 +77,7 @@ impl Field {
         Ok(())
     }
 
+    #[cfg(feature = "read-http")]
     pub fn obs_fold(&mut self, extra: &[u8]) {
         self.value.push(SP);
         self.value.extend(trim_ows(extra));
@@ -145,29 +155,48 @@ impl FieldSection {
     }
 
     #[cfg(feature = "read-bhttp")]
-    pub fn read_bhttp(mode: Mode, r: &mut impl io::BufRead) -> Res<Self> {
-        if mode == Mode::KnownLength {
-            let buf = read_vec(r)?;
-            return Self::read_bhttp(Mode::IndefiniteLength, &mut io::BufReader::new(&buf[..]));
-        }
+    fn read_bhttp_fields(terminator: bool, r: &mut impl io::BufRead) -> Res<Vec<Field>> {
         let mut fields = Vec::new();
         let mut cookie_index: Option<usize> = None;
         loop {
-            let n = read_vec(r)?; // TODO deal with empty read here.
-            if n.is_empty() {
-                return Ok(Self(fields));
-            }
-            let mut v = read_vec(r)?;
-            if n == COOKIE {
-                if let Some(i) = &cookie_index {
-                    fields[*i].value.extend_from_slice(b"; ");
-                    fields[*i].value.append(&mut v);
-                    continue;
+            if let Some(n) = read_vec(r)? {
+                if n.is_empty() {
+                    if terminator {
+                        return Ok(fields);
+                    } else {
+                        return Err(Error::Truncated);
+                    }
                 }
-                cookie_index = Some(fields.len());
+                let mut v = read_vec(r)?.ok_or(Error::Truncated)?;
+                if n == COOKIE {
+                    if let Some(i) = &cookie_index {
+                        fields[*i].value.extend_from_slice(b"; ");
+                        fields[*i].value.append(&mut v);
+                        continue;
+                    }
+                    cookie_index = Some(fields.len());
+                }
+                fields.push(Field::new(n, v));
+            } else if terminator {
+                return Err(Error::Truncated);
+            } else {
+                return Ok(fields);
             }
-            fields.push(Field::new(n, v));
         }
+    }
+
+    #[cfg(feature = "read-bhttp")]
+    pub fn read_bhttp(mode: Mode, r: &mut impl io::BufRead) -> Res<Self> {
+        let fields = if mode == Mode::KnownLength {
+            if let Some(buf) = read_vec(r)? {
+                Self::read_bhttp_fields(false, &mut io::BufReader::new(&buf[..]))?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Self::read_bhttp_fields(true, r)?
+        };
+        Ok(Self(fields))
     }
 
     #[cfg(feature = "write-bhttp")]
@@ -258,24 +287,25 @@ impl ControlData {
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(request: bool, r: &mut impl io::BufRead) -> Res<Self> {
         let v = if request {
-            let method = read_vec(r)?;
+            let method = read_vec(r)?.ok_or(Error::Truncated)?;
             let mut url = Vec::new();
-            let mut scheme = read_vec(r)?;
+            let mut scheme = read_vec(r)?.ok_or(Error::Truncated)?;
             url.append(&mut scheme);
             url.extend_from_slice(b"://");
-            let mut authority = read_vec(r)?;
+            let mut authority = read_vec(r)?.ok_or(Error::Truncated)?;
             url.append(&mut authority);
-            let mut path = read_vec(r)?;
+            let mut path = read_vec(r)?.ok_or(Error::Truncated)?;
             url.append(&mut path);
 
             Self::Request { method, url }
         } else {
-            Self::Response(u16::try_from(read_varint(r)?)?)
+            Self::Response(u16::try_from(read_varint(r)?.ok_or(Error::Truncated)?)?)
         };
         Ok(v)
     }
 
     /// If this is an informational response.
+    #[cfg(any(feature = "read-bhttp", feature = "read-http"))]
     #[must_use]
     fn informational(&self) -> Option<StatusCode> {
         match self {
@@ -284,6 +314,7 @@ impl ControlData {
         }
     }
 
+    #[cfg(feature = "write-bhttp")]
     #[must_use]
     fn code(&self, mode: Mode) -> u64 {
         match (self, mode) {
@@ -341,7 +372,7 @@ impl ControlData {
         match self {
             Self::Request { method, url } => {
                 w.write_all(method)?;
-                w.write_all(&[SP])?;
+                w.write_all(b" ")?;
                 w.write_all(url)?;
                 w.write_all(b" HTTP/1.1\r\n")?;
             }
@@ -375,6 +406,7 @@ impl InformationalResponse {
         &self.fields
     }
 
+    #[cfg(feature = "write-bhttp")]
     fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         write_varint(self.status, w)?;
         self.fields.write_bhttp(mode, w)?;
@@ -506,7 +538,7 @@ impl Message {
 
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(r: &mut impl io::BufRead) -> Res<Self> {
-        let t = read_varint(r)?;
+        let t = read_varint(r)?.ok_or(Error::Truncated)?;
         let request = t == 0 || t == 1;
         let mode = match t {
             0 | 2 => Mode::KnownLength,
@@ -523,10 +555,10 @@ impl Message {
         }
         let header = FieldSection::read_bhttp(mode, r)?;
 
-        let mut content = read_vec(r)?;
+        let mut content = read_vec(r)?.unwrap_or_default();
         if mode == Mode::IndefiniteLength && !content.is_empty() {
             loop {
-                let mut extra = read_vec(r)?;
+                let mut extra = read_vec(r)?.unwrap_or_default();
                 if extra.is_empty() {
                     break;
                 }
