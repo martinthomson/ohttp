@@ -1,0 +1,123 @@
+# In this file, every section corresponds to a header file.
+# A corresponding binding file will be created in $OUT_DIR.
+
+[nss_secerr]
+types = ["SECErrorCodes"]
+enums = ["SECErrorCodes"]
+
+[nss_init]
+functions = [
+    "NSS_IsInitialized",
+    "NSS_NoDB_Init",
+    "NSS_SetDomesticPolicy",
+    "NSS_Shutdown",
+]
+
+[nss_p11]
+types = [
+    "CK_ATTRIBUTE_TYPE",
+    "CK_BBOOL",
+    "CK_HKDF_PARAMS",
+    "CK_MECHANISM_TYPE",
+    "CK_OBJECT_HANDLE",
+    "CK_ULONG",
+    "SECItem",
+    "SECItemArray",
+    "SECOidData",
+]
+functions = [
+    "PK11_Derive",
+    "PK11_Encrypt",
+    "PK11_ExtractKeyValue",
+    "PK11_FindCertFromNickname",
+    "PK11_FindKeyByAnyCert",
+    "PK11_FreeSlot",
+    "PK11_FreeSymKey",
+    "PK11_GenerateKeyPair",
+    "PK11_GenerateRandom",
+    "PK11_GetBlockSize",
+    "PK11_GetInternalSlot",
+    "PK11_GetKeyData",
+    "PK11_GetMechanism",
+    "PK11_ImportSymKey",
+    "PK11_ReferenceSymKey",
+    "SECITEM_FreeItem",
+    "SECKEY_DestroyPrivateKey",
+    "SECKEY_DestroyPublicKey",
+    "SECOID_FindOIDByTag",
+]
+enums = [
+    "PK11Origin",
+    "SECItemType",
+    "SECOidTag",
+]
+opaque = [
+    "PK11SlotInfo",
+    "PK11SymKey",
+    "SECKEYPrivateKey",
+    "SECKEYPublicKey",
+]
+variables = [
+    "CK_INVALID_HANDLE",
+    "CKA_DERIVE",
+    "CKF_HKDF_SALT_DATA",
+    "CKF_HKDF_SALT_NULL",
+    "CKM_AES_GCM",
+    "CKM_EC_KEY_PAIR_GEN",
+    "CKM_HKDF_DATA",
+    "CKM_HKDF_DERIVE",
+    "CKM_INVALID_MECHANISM",
+    "CKM_CHACHA20_POLY1305",
+    "CKM_SHA256",
+    "SEC_ASN1_OBJECT_ID",
+]
+
+[nspr_err]
+# NSPR doesn't use an enum for errors, so we have to pull in everything in the header file.
+# Specifying no types, functions, or variables does that, but then exclude some.
+exclude = [
+    "nspr_.*",
+    "PR_MAX_ERROR",
+    "ERROR_TABLE_BASE_nspr"
+]
+
+[nspr_error]
+functions = [
+    "PR_ErrorToName",
+    "PR_ErrorToString",
+    "PR_GetError",
+    "PR_SetError",
+]
+variables = [
+    "PR_LANGUAGE_I_DEFAULT",
+]
+
+[nss_hpke]
+functions = [
+    "PK11_HPKE_Deserialize",
+    "PK11_HPKE_DestroyContext",
+    "PK11_HPKE_ExportSecret",
+    "PK11_HPKE_GetEncapPubKey",
+    "PK11_HPKE_NewContext",
+    "PK11_HPKE_Open",
+    "PK11_HPKE_Seal",
+    "PK11_HPKE_Serialize",
+    "PK11_HPKE_SetupR",
+    "PK11_HPKE_SetupS",
+    "PK11_HPKE_ValidateParameters",
+]
+enums = [
+    "HpkeModeId",
+    "HpkeKemId",
+    "HpkeKdfId",
+    "HpkeAeadId",
+]
+variables = [
+    "HPKE_DRAFT_VERSION",
+]
+opaque = [
+    "HpkeContext",
+    "SECItem",
+    "SECKEYPrivateKey",
+    "SECKEYPublicKey",
+]
