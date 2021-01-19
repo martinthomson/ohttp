@@ -31,8 +31,8 @@ pub type StatusCode = u16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(feature = "write-bhttp")]
 pub enum Mode {
-    Known,
-    Indefinite,
+    KnownLength,
+    IndefiniteLength,
 }
 
 pub struct Field {
@@ -150,9 +150,9 @@ impl FieldSection {
 
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(mode: Mode, r: &mut impl io::BufRead) -> Res<Self> {
-        if mode == Mode::Known {
+        if mode == Mode::KnownLength {
             let buf = read_vec(r)?;
-            return Self::read_bhttp(Mode::Indefinite, &mut io::BufReader::new(&buf[..]));
+            return Self::read_bhttp(Mode::IndefiniteLength, &mut io::BufReader::new(&buf[..]));
         }
         let mut fields = Vec::new();
         let mut cookie_index: Option<usize> = None;
@@ -184,7 +184,7 @@ impl FieldSection {
 
     #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
-        if mode == Mode::Known {
+        if mode == Mode::KnownLength {
             let mut buf = Vec::new();
             self.write_bhttp_headers(&mut buf)?;
             write_vec(&buf, w)?;
@@ -291,10 +291,10 @@ impl ControlData {
     #[must_use]
     fn code(&self, mode: Mode) -> u64 {
         match (self, mode) {
-            (Self::Request { .. }, Mode::Known) => 0,
-            (Self::Request { .. }, Mode::Indefinite) => 1,
-            (Self::Response(_), Mode::Known) => 2,
-            (Self::Response(_), Mode::Indefinite) => 3,
+            (Self::Request { .. }, Mode::KnownLength) => 0,
+            (Self::Request { .. }, Mode::IndefiniteLength) => 1,
+            (Self::Response(_), Mode::KnownLength) => 2,
+            (Self::Response(_), Mode::IndefiniteLength) => 3,
         }
     }
 
@@ -513,8 +513,8 @@ impl Message {
         let t = read_varint(r)?;
         let request = t == 0 || t == 1;
         let mode = match t {
-            0 | 2 => Mode::Known,
-            1 | 3 => Mode::Indefinite,
+            0 | 2 => Mode::KnownLength,
+            1 | 3 => Mode::IndefiniteLength,
             _ => panic!("Unsupported mode"),
         };
 
@@ -528,7 +528,7 @@ impl Message {
         let header = FieldSection::read_bhttp(mode, r)?;
 
         let mut content = read_vec(r)?;
-        if mode == Mode::Indefinite && !content.is_empty() {
+        if mode == Mode::IndefiniteLength && !content.is_empty() {
             loop {
                 let mut extra = read_vec(r)?;
                 if extra.is_empty() {
@@ -558,7 +558,7 @@ impl Message {
         self.control.write_bhttp(self.header.get(HOST), w)?;
         self.header.write_bhttp(mode, w)?;
         write_vec(&self.content, w)?;
-        if mode == Mode::Indefinite {
+        if mode == Mode::IndefiniteLength {
             write_len(0, w)?;
         }
         self.trailer.write_bhttp(mode, w)?;

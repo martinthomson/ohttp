@@ -14,8 +14,11 @@ use structopt::StructOpt;
     about = "Translator between message/http and message/bhttp."
 )]
 struct Args {
+    /// Decode message/bhttp and produce message/http instead.
     #[structopt(long, short = "d")]
     decode: bool,
+
+    /// When creating message/bhttp, use the indefinite-length form.
     #[structopt(long, short = "i")]
     indefinite: bool,
 }
@@ -23,9 +26,9 @@ struct Args {
 impl Args {
     fn mode(&self) -> Mode {
         if self.indefinite {
-            Mode::Indefinite
+            Mode::IndefiniteLength
         } else {
-            Mode::Known
+            Mode::KnownLength
         }
     }
 }
