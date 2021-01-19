@@ -11,13 +11,14 @@ use std::convert::TryFrom;
 use std::os::raw::c_int;
 use std::ptr::{null_mut, NonNull};
 
+#[derive(Clone, Copy)]
 pub enum KeyMechanism {
     Aead(AeadId::Type),
     Hkdf,
 }
 
 impl KeyMechanism {
-    fn mech(&self) -> CK_MECHANISM_TYPE {
+    fn mech(self) -> CK_MECHANISM_TYPE {
         CK_MECHANISM_TYPE::from(match self {
             Self::Aead(AeadId::HpkeAeadAes128Gcm) => CKM_AES_GCM,
             Self::Aead(AeadId::HpkeAeadChaCha20Poly1305) => CKM_CHACHA20_POLY1305,
@@ -25,8 +26,8 @@ impl KeyMechanism {
             _ => unimplemented!(),
         })
     }
-    
-    fn len(&self) -> usize {
+
+    fn len(self) -> usize {
         match self {
             Self::Aead(AeadId::HpkeAeadAes128Gcm) => 16,
             Self::Aead(AeadId::HpkeAeadChaCha20Poly1305) => 32,
@@ -71,7 +72,7 @@ impl Hkdf {
             )
         };
         Ok(SymKey::from_ptr(
-            NonNull::new(ptr).ok_or(Error::internal())?,
+            NonNull::new(ptr).ok_or_else(Error::internal)?,
         ))
     }
 
@@ -103,7 +104,7 @@ impl Hkdf {
             )
         };
         Ok(SymKey::from_ptr(
-            NonNull::new(ptr).ok_or(Error::internal())?,
+            NonNull::new(ptr).ok_or_else(Error::internal)?,
         ))
     }
 
@@ -119,10 +120,10 @@ impl Hkdf {
                 c_int::try_from(len).unwrap(),
             )
         };
-        let k = SymKey::from_ptr(NonNull::new(ptr).ok_or(Error::internal())?);
+        let k = SymKey::from_ptr(NonNull::new(ptr).ok_or_else(Error::internal)?);
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(*k) })?;
         let data_ptr = unsafe { PK11_GetKeyData(*k) };
-        let data = unsafe { data_ptr.as_ref() }.ok_or(Error::internal())?;
+        let data = unsafe { data_ptr.as_ref() }.ok_or_else(Error::internal)?;
         let slc =
             unsafe { std::slice::from_raw_parts(data.data, usize::try_from(data.len).unwrap()) };
         Ok(Vec::from(slc))

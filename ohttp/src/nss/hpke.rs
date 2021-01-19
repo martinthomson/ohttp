@@ -10,13 +10,14 @@ use std::ptr::{null, null_mut, NonNull};
     dead_code,
     non_upper_case_globals,
     non_camel_case_types,
-    non_snake_case
+    non_snake_case,
+    clippy::pedantic
 )]
-mod hpke {
+mod nss_hpke {
     include!(concat!(env!("OUT_DIR"), "/nss_hpke.rs"));
 }
 
-pub use hpke::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
+pub use nss_hpke::{HpkeAeadId as AeadId, HpkeContext, HpkeKdfId as KdfId, HpkeKemId as KemId};
 
 /// Configuration for `Hpke`.
 /// As there are relatively few options, use the builder pattern
@@ -55,16 +56,16 @@ impl Default for HpkeConfig {
     }
 }
 
-unsafe fn destroy_hpke_context(cx: *mut hpke::HpkeContext) {
-    hpke::PK11_HPKE_DestroyContext(cx, hpke::PRBool::from(true));
+unsafe fn destroy_hpke_context(cx: *mut HpkeContext) {
+    nss_hpke::PK11_HPKE_DestroyContext(cx, nss_hpke::PRBool::from(true));
 }
 
-scoped_ptr!(Hpke, hpke::HpkeContext, destroy_hpke_context);
+scoped_ptr!(Hpke, nss_hpke::HpkeContext, destroy_hpke_context);
 
-/// A version of Item::wrap that deals with the type aliasing we have.
-fn wrap(buf: &[u8]) -> hpke::SECItem {
+/// A version of `Item::wrap` that deals with the type aliasing we have.
+fn wrap(buf: &[u8]) -> nss_hpke::SECItem {
     debug_assert_eq!(
-        mem::size_of::<hpke::SECItem>(),
+        mem::size_of::<nss_hpke::SECItem>(),
         mem::size_of::<p11::SECItem>()
     );
     // Safe because these are aliases of the same underlying type.
@@ -74,9 +75,10 @@ fn wrap(buf: &[u8]) -> hpke::SECItem {
 impl Hpke {
     /// Create a new context that uses the KEM mode.
     /// This object is useless until `setup_s` or `setup_r` is called.
-    pub fn new(cfg: HpkeConfig) -> Res<Self> {
-        let hpke_ptr =
-            unsafe { hpke::PK11_HPKE_NewContext(cfg.kem, cfg.kdf, cfg.aead, null_mut(), null()) };
+    pub fn new(cfg: &HpkeConfig) -> Res<Self> {
+        let hpke_ptr = unsafe {
+            nss_hpke::PK11_HPKE_NewContext(cfg.kem, cfg.kdf, cfg.aead, null_mut(), null())
+        };
         match NonNull::new(hpke_ptr) {
             Some(p) => Ok(Hpke::from_ptr(p)),
             None => Err(Error::internal()),
@@ -92,23 +94,23 @@ impl Hpke {
         info: &[u8],
     ) -> Res<()> {
         secstatus_to_res(unsafe {
-            hpke::PK11_HPKE_SetupS(**self, **pk_e, **sk_e, **pk_r, &wrap(info))
+            nss_hpke::PK11_HPKE_SetupS(**self, **pk_e, **sk_e, **pk_r, &wrap(info))
         })
     }
 
     /// Get the encapsulated KEM secret.
     pub fn enc(&self) -> Res<Vec<u8>> {
-        let v = unsafe { hpke::PK11_HPKE_GetEncapPubKey(**self) };
+        let v = unsafe { nss_hpke::PK11_HPKE_GetEncapPubKey(**self) };
         if v.is_null() {
             secstatus_to_res(SECFailure)?;
             unreachable!();
         }
         debug_assert_eq!(
-            mem::size_of::<hpke::SECItem>(),
+            mem::size_of::<nss_hpke::SECItem>(),
             mem::size_of::<p11::SECItemStr>()
         );
         let it = v as *const p11::SECItemStr;
-        let r = unsafe { it.as_ref() }.ok_or(Error::internal())?;
+        let r = unsafe { it.as_ref() }.ok_or_else(Error::internal)?;
         // This is just an alias, so we can't use `Item`.
         let len = usize::try_from(r.len).unwrap();
         let slc = unsafe { std::slice::from_raw_parts(r.data, len) };
@@ -124,28 +126,32 @@ impl Hpke {
         info: &[u8],
     ) -> Res<()> {
         secstatus_to_res(unsafe {
-            hpke::PK11_HPKE_SetupR(**self, **pk_r, **sk_r, &wrap(enc), &wrap(info))
+            nss_hpke::PK11_HPKE_SetupR(**self, **pk_r, **sk_r, &wrap(enc), &wrap(info))
         })
     }
 
     pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
-        let mut out: *mut hpke::SECItem = null_mut();
-        secstatus_to_res(unsafe { hpke::PK11_HPKE_Seal(**self, &wrap(aad), &wrap(pt), &mut out) })?;
+        let mut out: *mut nss_hpke::SECItem = null_mut();
+        secstatus_to_res(unsafe {
+            nss_hpke::PK11_HPKE_Seal(**self, &wrap(aad), &wrap(pt), &mut out)
+        })?;
         let v = Item::new(out as *mut _)?;
-        Ok(unsafe { v.to_vec() })
+        Ok(unsafe { v.into_vec() })
     }
 
     pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
-        let mut out: *mut hpke::SECItem = null_mut();
-        secstatus_to_res(unsafe { hpke::PK11_HPKE_Open(**self, &wrap(aad), &wrap(ct), &mut out) })?;
+        let mut out: *mut nss_hpke::SECItem = null_mut();
+        secstatus_to_res(unsafe {
+            nss_hpke::PK11_HPKE_Open(**self, &wrap(aad), &wrap(ct), &mut out)
+        })?;
         let v = Item::new(out as *mut _)?;
-        Ok(unsafe { v.to_vec() })
+        Ok(unsafe { v.into_vec() })
     }
 
     pub fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
-        let mut out: *mut hpke::PK11SymKey = null_mut();
+        let mut out: *mut nss_hpke::PK11SymKey = null_mut();
         secstatus_to_res(unsafe {
-            hpke::PK11_HPKE_ExportSecret(
+            nss_hpke::PK11_HPKE_ExportSecret(
                 **self,
                 &wrap(info),
                 c_uint::try_from(len).unwrap(),
@@ -167,7 +173,7 @@ mod test {
     #[must_use]
     fn new_context() -> Hpke {
         init();
-        Hpke::new(HpkeConfig::default()).unwrap()
+        Hpke::new(&HpkeConfig::default()).unwrap()
     }
 
     #[test]
@@ -188,13 +194,13 @@ mod test {
         let (mut sk_r, mut pk_r) = generate_key_pair().unwrap();
 
         // Send
-        let mut hpke_s = Hpke::new(cfg.clone()).unwrap();
+        let mut hpke_s = Hpke::new(&cfg).unwrap();
         hpke_s.setup_s(&pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
         let enc = hpke_s.enc().unwrap();
         let ct = hpke_s.seal(AAD, PT).unwrap();
 
         // Receive
-        let mut hpke_r = Hpke::new(cfg).unwrap();
+        let mut hpke_r = Hpke::new(&cfg).unwrap();
         hpke_r.setup_r(&pk_r, &mut sk_r, &enc, INFO).unwrap();
         let pt = hpke_r.open(AAD, &ct).unwrap();
         assert_eq!(&pt[..], PT);

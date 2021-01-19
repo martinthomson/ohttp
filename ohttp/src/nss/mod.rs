@@ -24,16 +24,16 @@ pub use err::secstatus_to_res;
 use lazy_static::lazy_static;
 use std::ptr::null;
 
-#[allow(clippy::redundant_static_lifetimes, non_upper_case_globals)]
-mod nss {
+#[allow(clippy::pedantic, non_upper_case_globals)]
+mod nss_init {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
-pub use nss::SECStatus;
+pub use nss_init::SECStatus;
 #[allow(non_upper_case_globals)]
-pub const SECSuccess: SECStatus = nss::_SECStatus_SECSuccess;
+pub const SECSuccess: SECStatus = nss_init::_SECStatus_SECSuccess;
 #[allow(non_upper_case_globals)]
-pub const SECFailure: SECStatus = nss::_SECStatus_SECFailure;
+pub const SECFailure: SECStatus = nss_init::_SECStatus_SECFailure;
 
 #[derive(PartialEq, Eq)]
 enum NssLoaded {
@@ -44,7 +44,7 @@ enum NssLoaded {
 impl Drop for NssLoaded {
     fn drop(&mut self) {
         if *self == Self::NoDb {
-            unsafe { secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed") }
+            unsafe { secstatus_to_res(nss_init::NSS_Shutdown()).expect("NSS Shutdown failed") }
         }
     }
 }
@@ -55,8 +55,8 @@ lazy_static! {
             return NssLoaded::External;
         }
 
-        secstatus_to_res(unsafe { nss::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-        secstatus_to_res(unsafe { nss::NSS_SetDomesticPolicy() })
+        secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
+        secstatus_to_res(unsafe { nss_init::NSS_SetDomesticPolicy() })
             .expect("NSS_SetDomesticPolicy failed");
 
         NssLoaded::NoDb
@@ -64,7 +64,7 @@ lazy_static! {
 }
 
 fn already_initialized() -> bool {
-    unsafe { nss::NSS_IsInitialized() != 0 }
+    unsafe { nss_init::NSS_IsInitialized() != 0 }
 }
 
 /// Initialize NSS.  This only executes the initialization routines once.

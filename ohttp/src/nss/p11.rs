@@ -7,16 +7,16 @@
 use super::err::{secstatus_to_res, Error, Res};
 
 use std::convert::TryFrom;
+use std::mem;
 use std::os::raw::{c_int, c_uint, c_void};
 use std::ptr::{null_mut, NonNull};
-use std::mem;
 
 #[allow(
     dead_code,
     non_upper_case_globals,
     non_camel_case_types,
     non_snake_case,
-    clippy::unreadable_literal
+    clippy::pedantic
 )]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
@@ -139,26 +139,26 @@ impl Item {
         }
     }
 
-    /// The PKCS#11 interface parameter objects are wrapped in SECItem.
+    /// PKCS#11 interface parameter objects are wrapped in `SECItem`.
     /// This function wraps any type of parameter by aliasing its memory.
     pub(crate) fn param_wrap<T: Sized>(v: &T) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
             data: v as *const _ as *mut u8,
-            len:c_uint::try_from(mem::size_of::<T>()).unwrap(),
+            len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         }
     }
 
     pub(crate) fn new(ptr: *mut SECItem) -> Res<Self> {
         match NonNull::new(ptr) {
             Some(p) => Ok(Item::from_ptr(p)),
-            None => return Err(Error::internal()),
+            None => Err(Error::internal()),
         }
     }
 
     /// Massively unsafe.  This dereferences the pointer and makes a copy of the
     /// content that is referenced there.
-    pub(crate) unsafe fn to_vec(self) -> Vec<u8> {
+    pub(crate) unsafe fn into_vec(self) -> Vec<u8> {
         let b = self.ptr.as_ref().unwrap();
         // Sanity check the type, as some types don't count bytes in `Item::len`.
         assert_eq!(b.type_, SECItemType::siBuffer);
@@ -173,7 +173,7 @@ pub fn generate_key_pair() -> Res<(PrivateKey, PublicKey)> {
     let slot = Slot::internal()?;
 
     let oid_data = unsafe { SECOID_FindOIDByTag(SECOidTag::SEC_OID_CURVE25519) };
-    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::internal())?;
+    let oid = unsafe { oid_data.as_ref() }.ok_or_else(Error::internal)?;
     let oid_slc =
         unsafe { std::slice::from_raw_parts(oid.oid.data, usize::try_from(oid.oid.len).unwrap()) };
     let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
