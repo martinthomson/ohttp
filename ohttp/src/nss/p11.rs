@@ -10,9 +10,8 @@ use std::boxed::Box;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::mem;
-use std::os::raw::{c_int, c_uint, c_void};
+use std::os::raw::{c_int, c_uint};
 use std::pin::Pin;
-use std::ptr::null_mut;
 
 #[allow(
     dead_code,
@@ -27,10 +26,9 @@ pub mod sys {
 
 use sys::{
     PK11SlotInfo, PK11SymKey, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
-    PK11_GenerateKeyPair, PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData,
-    PK11_ReferenceSymKey, PRBool, SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey,
-    SECKEYPublicKey, SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey, SECOID_FindOIDByTag,
-    SECOidTag, CKM_EC_KEY_PAIR_GEN, CK_MECHANISM_TYPE, SEC_ASN1_OBJECT_ID,
+    PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData, PK11_ReferenceSymKey, PRBool,
+    SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey, SECKEYPublicKey,
+    SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey,
 };
 
 macro_rules! scoped_ptr {
@@ -73,6 +71,25 @@ macro_rules! scoped_ptr {
 
 scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
+
+impl PublicKey {
+    /// Get the HPKE serialization of the public key.
+    pub fn serialize(&self) -> Res<Vec<u8>> {
+        let mut buf = vec![0; 100];
+        let mut len: c_uint = 0;
+        secstatus_to_res(unsafe {
+            sys::PK11_HPKE_Serialize(
+                **self,
+                buf.as_mut_ptr(),
+                &mut len,
+                c_uint::try_from(buf.len()).unwrap(),
+            )
+        })?;
+        buf.truncate(usize::try_from(len).unwrap());
+        Ok(buf)
+    }
+}
+
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
@@ -134,7 +151,7 @@ pub fn random(size: usize) -> Vec<u8> {
 
 pub(crate) struct ParamItem<T> {
     reference: Pin<Box<SECItem>>,
-    params: Vec<u8>,
+    _params: Vec<u8>,
     marker: PhantomData<T>,
 }
 
@@ -150,7 +167,7 @@ impl<T: Sized> ParamItem<T> {
         });
         Self {
             reference,
-            params,
+            _params: params,
             marker: PhantomData::default(),
         }
     }
@@ -191,50 +208,15 @@ impl Item {
     }
 }
 
-/// Generates an X25519 key pair.
-/// This might need to be more flexible in future, but this will do for now.
-pub fn generate_key_pair() -> Res<(PrivateKey, PublicKey)> {
-    let slot = Slot::internal()?;
-
-    let oid_data = unsafe { SECOID_FindOIDByTag(SECOidTag::SEC_OID_CURVE25519) };
-    let oid = unsafe { oid_data.as_ref() }.ok_or_else(Error::internal)?;
-    let oid_slc =
-        unsafe { std::slice::from_raw_parts(oid.oid.data, usize::try_from(oid.oid.len).unwrap()) };
-    let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
-    params.push(u8::try_from(SEC_ASN1_OBJECT_ID).unwrap());
-    params.push(u8::try_from(oid.oid.len).unwrap());
-    params.extend_from_slice(oid_slc);
-
-    let mut pk: *mut SECKEYPublicKey = null_mut();
-    let sk = unsafe {
-        PK11_GenerateKeyPair(
-            *slot,
-            CK_MECHANISM_TYPE::from(CKM_EC_KEY_PAIR_GEN),
-            &mut Item::wrap(&params) as *mut _ as *mut c_void,
-            &mut pk,
-            PRBool::from(false),
-            PRBool::from(true),
-            null_mut(),
-        )
-    };
-    Ok((PrivateKey::from_ptr(sk)?, PublicKey::from_ptr(pk)?))
-}
-
 #[cfg(test)]
 mod test {
     use super::super::init;
-    use super::{generate_key_pair, random};
+    use super::random;
 
     #[test]
     fn randomness() {
         init();
         // If this ever fails, there is either a bug, or it's time to buy a lottery ticket.
         assert_ne!(random(16), random(16));
-    }
-
-    #[test]
-    fn keypair() {
-        init();
-        generate_key_pair().unwrap();
     }
 }

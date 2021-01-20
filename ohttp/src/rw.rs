@@ -1,12 +1,10 @@
-#[cfg(feature = "read-bhttp")]
 use crate::err::Error;
 use crate::err::Res;
 use std::convert::TryFrom;
 use std::io;
 
-#[cfg(feature = "write-bhttp")]
 #[allow(clippy::cast_possible_truncation)]
-fn write_uint(n: u8, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
+pub fn write_uint(n: u8, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into();
     assert!(n > 0 && usize::from(n) < std::mem::size_of::<u64>());
     for i in 0..n {
@@ -15,7 +13,6 @@ fn write_uint(n: u8, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     Ok(())
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into();
     match () {
@@ -27,20 +24,17 @@ pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     }
 }
 
-#[cfg(feature = "write-bhttp")]
-pub fn write_len(len: usize, w: &mut impl io::Write) -> Res<()> {
+fn write_len(len: usize, w: &mut impl io::Write) -> Res<()> {
     write_varint(u64::try_from(len).unwrap(), w)
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_vec(v: &[u8], w: &mut impl io::Write) -> Res<()> {
     write_len(v.len(), w)?;
     w.write_all(v)?;
     Ok(())
 }
 
-#[cfg(feature = "read-bhttp")]
-fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<Option<u64>> {
+pub fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<Option<u64>> {
     let mut buf = [0; 7];
     let count = r.read(&mut buf[..n])?;
     if count == 0 {
@@ -55,7 +49,6 @@ fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<Option<u64>> {
     Ok(Some(v))
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_varint(r: &mut impl io::BufRead) -> Res<Option<u64>> {
     if let Some(b1) = read_uint(1, r)? {
         Ok(Some(match b1 >> 6 {
@@ -70,7 +63,6 @@ pub fn read_varint(r: &mut impl io::BufRead) -> Res<Option<u64>> {
     }
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_vec(r: &mut impl io::BufRead) -> Res<Option<Vec<u8>>> {
     if let Some(len) = read_varint(r)? {
         let mut v = vec![0; usize::try_from(len).unwrap()];

@@ -2,6 +2,7 @@ name: CI
 on: [push, pull_request]
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -C link-arg=-fuse-ld=lld
 
 jobs:
   build_and_test:
@@ -14,9 +15,15 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install Build Prerequisites for NSS
+        run: |
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
+            ca-certificates coreutils curl git make mercurial ssh \
+            build-essential clang llvm libclang-dev lld \
+            gyp ninja-build pkg-config zlib1g-dev
+
       - name: Fetch NSS and NSPR
         run: |
-          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends mercurial
           hg clone https://hg.mozilla.org/projects/nspr ./nspr
           git clone --depth 1 https://github.com/nss-dev/nss ./nss
 

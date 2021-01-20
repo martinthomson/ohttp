@@ -20,8 +20,9 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
-pub use self::p11::{generate_key_pair, random, SymKey};
-pub use err::secstatus_to_res;
+pub use self::p11::{random, PrivateKey, PublicKey, SymKey};
+use err::secstatus_to_res;
+pub use err::Error;
 use lazy_static::lazy_static;
 use std::ptr::null;
 
@@ -30,11 +31,12 @@ mod nss_init {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
-pub use nss_init::SECStatus;
+use nss_init::SECStatus;
 #[allow(non_upper_case_globals)]
-pub const SECSuccess: SECStatus = nss_init::_SECStatus_SECSuccess;
+const SECSuccess: SECStatus = nss_init::_SECStatus_SECSuccess;
+#[cfg(test)]
 #[allow(non_upper_case_globals)]
-pub const SECFailure: SECStatus = nss_init::_SECStatus_SECFailure;
+const SECFailure: SECStatus = nss_init::_SECStatus_SECFailure;
 
 #[derive(PartialEq, Eq)]
 enum NssLoaded {
@@ -71,9 +73,4 @@ fn already_initialized() -> bool {
 /// Initialize NSS.  This only executes the initialization routines once.
 pub fn init() {
     lazy_static::initialize(&INITIALIZED);
-}
-
-/// Panic if NSS isn't initialized.
-pub fn assert_initialized() {
-    assert!(already_initialized());
 }
