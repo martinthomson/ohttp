@@ -37,6 +37,7 @@ functions = [
 types = [
     "CK_ATTRIBUTE_TYPE",
     "CK_BBOOL",
+    "CK_GENERATOR_FUNCTION",
     "CK_HKDF_PARAMS",
     "CK_MECHANISM_TYPE",
     "CK_OBJECT_HANDLE",
@@ -46,7 +47,10 @@ types = [
     "SECOidData",
 ]
 functions = [
+    "PK11_AEADOp",
+    "PK11_CreateContextBySymKey",
     "PK11_Derive",
+    "PK11_DestroyContext",
     "PK11_Encrypt",
     "PK11_ExtractKeyValue",
     "PK11_FindCertFromNickname",
@@ -87,6 +91,7 @@ enums = [
 ]
 opaque = [
     "HpkeContext",
+    "PK11Context",
     "PK11SlotInfo",
     "PK11SymKey",
     "SECKEYPrivateKey",
@@ -94,11 +99,16 @@ opaque = [
 ]
 variables = [
     "CK_INVALID_HANDLE",
+    "CKA_DECRYPT",
     "CKA_DERIVE",
+    "CKA_ENCRYPT",
+    "CKA_NSS_MESSAGE",
     "CKA_SIGN",
     "CKF_HKDF_SALT_DATA",
-    "CKM_HKDF_KEY_GEN",
     "CKF_HKDF_SALT_NULL",
+    "CKG_NO_GENERATE",
+    "CKG_GENERATE_COUNTER_XOR",
+    "CKM_HKDF_KEY_GEN",
     "CKM_AES_GCM",
     "CKM_EC_KEY_PAIR_GEN",
     "CKM_HKDF_DATA",

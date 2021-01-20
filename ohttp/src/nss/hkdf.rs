@@ -100,7 +100,7 @@ impl Hkdf {
     }
 
     fn expand_params(&self, info: &[u8]) -> ParamItem<CK_HKDF_PARAMS> {
-        let mut params = CK_HKDF_PARAMS {
+        ParamItem::new(&CK_HKDF_PARAMS {
             bExtract: CK_BBOOL::from(false),
             bExpand: CK_BBOOL::from(true),
             prfHashMechanism: self.mech(),
@@ -110,8 +110,7 @@ impl Hkdf {
             hSaltKey: CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE),
             pInfo: info.as_ptr() as *mut _, // const-cast = bad API
             ulInfoLen: CK_ULONG::try_from(info.len()).unwrap(),
-        };
-        ParamItem::new(&params)
+        })
     }
 
     pub fn expand_key(&self, prk: &SymKey, info: &[u8], key_mech: KeyMechanism) -> Res<SymKey> {

@@ -16,6 +16,7 @@
 mod err;
 #[macro_use]
 mod p11;
+pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
