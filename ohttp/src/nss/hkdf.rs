@@ -164,11 +164,11 @@ mod test {
         let prk_data = prk.key_data().unwrap();
         assert_eq!(prk_data, expected_prk);
 
-        let okm = hkdf.expand_data(&prk, info, l).unwrap();
-        assert_eq!(&okm[..], expected_okm);
+        let out = hkdf.expand_data(&prk, info, l).unwrap();
+        assert_eq!(&out[..], expected_okm);
     }
 
-    /// Example 1 from https://tools.ietf.org/html/rfc5869#appendix-A.1
+    /// Example 1 from <https://tools.ietf.org/html/rfc5869#appendix-A.1>
     #[test]
     fn example1() {
         const IKM: &[u8] = &[
@@ -193,7 +193,7 @@ mod test {
         sha256_example(IKM, SALT, INFO, L, PRK, OKM);
     }
 
-    /// Example 2 from https://tools.ietf.org/html/rfc5869#appendix-A.2
+    /// Example 2 from <https://tools.ietf.org/html/rfc5869#appendix-A.2>
     #[test]
     fn example2() {
         const IKM: &[u8] = &[
@@ -237,7 +237,7 @@ mod test {
         sha256_example(IKM, SALT, INFO, L, PRK, OKM);
     }
 
-    /// Example 3 from https://tools.ietf.org/html/rfc5869#appendix-A.3
+    /// Example 3 from <https://tools.ietf.org/html/rfc5869#appendix-A.3>
     #[test]
     fn example3() {
         const IKM: &[u8] = &[

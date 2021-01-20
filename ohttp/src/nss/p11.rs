@@ -40,7 +40,6 @@ macro_rules! scoped_ptr {
         }
 
         impl $scoped {
-            #[must_use]
             pub fn from_ptr(ptr: *mut $target) -> Result<Self, crate::nss::err::Error> {
                 if ptr.is_null() {
                     Err(crate::nss::err::Error::last())
