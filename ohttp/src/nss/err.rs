@@ -36,8 +36,7 @@ impl Error {
 
     /// Get the last error, as returned by `PR_GetError()`.
     pub(crate) fn last() -> Self {
-        panic!();
-        // Self::from(unsafe { PR_GetError() })
+        Self::from(unsafe { PR_GetError() })
     }
 }
 
