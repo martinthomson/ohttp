@@ -29,8 +29,15 @@ pub struct Error {
 }
 
 impl Error {
+    /// Get an internal error.
     pub(crate) fn internal() -> Self {
         Self::from(sec::SEC_ERROR_LIBRARY_FAILURE)
+    }
+
+    /// Get the last error, as returned by `PR_GetError()`.
+    pub(crate) fn last() -> Self {
+        panic!();
+        // Self::from(unsafe { PR_GetError() })
     }
 }
 
@@ -70,11 +77,10 @@ where
 
 pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     if rv == SECSuccess {
-        return Ok(());
+        Ok(())
+    } else {
+        Err(Error::last())
     }
-
-    let code = unsafe { PR_GetError() };
-    Err(Error::from(code))
 }
 
 pub fn is_blocked(result: &Res<()>) -> bool {

@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#define NSS_ENABLE_DRAFT_HPKE
 #include "secoidt.h"
 #include "keyhi.h"
 #include "pk11pub.h"

@@ -6,10 +6,13 @@
 
 use super::err::{secstatus_to_res, Error, Res};
 
+use std::boxed::Box;
 use std::convert::TryFrom;
+use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::{c_int, c_uint, c_void};
-use std::ptr::{null_mut, NonNull};
+use std::pin::Pin;
+use std::ptr::null_mut;
 
 #[allow(
     dead_code,
@@ -18,11 +21,17 @@ use std::ptr::{null_mut, NonNull};
     non_snake_case,
     clippy::pedantic
 )]
-mod nss_p11 {
+pub mod sys {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }
 
-pub use nss_p11::*;
+use sys::{
+    PK11SlotInfo, PK11SymKey, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
+    PK11_GenerateKeyPair, PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData,
+    PK11_ReferenceSymKey, PRBool, SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey,
+    SECKEYPublicKey, SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey, SECOID_FindOIDByTag,
+    SECOidTag, CKM_EC_KEY_PAIR_GEN, CK_MECHANISM_TYPE, SEC_ASN1_OBJECT_ID,
+};
 
 macro_rules! scoped_ptr {
     ($scoped:ident, $target:ty, $dtor:path) => {
@@ -32,8 +41,12 @@ macro_rules! scoped_ptr {
 
         impl $scoped {
             #[must_use]
-            pub fn from_ptr(ptr: NonNull<$target>) -> Self {
-                Self { ptr: ptr.as_ptr() }
+            pub fn from_ptr(ptr: *mut $target) -> Result<Self, crate::nss::err::Error> {
+                if ptr.is_null() {
+                    Err(crate::nss::err::Error::last())
+                } else {
+                    Ok(Self { ptr })
+                }
             }
         }
 
@@ -64,12 +77,9 @@ scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
-    fn internal() -> Res<Self> {
+    pub(crate) fn internal() -> Res<Self> {
         let p = unsafe { PK11_GetInternalSlot() };
-        match NonNull::new(p) {
-            Some(p) => Ok(Slot::from_ptr(p)),
-            None => Err(Error::internal()),
-        }
+        Slot::from_ptr(p)
     }
 }
 
@@ -79,14 +89,15 @@ impl SymKey {
     /// You really don't want to use this.
     ///
     /// # Errors
-    /// Internal errors in case of failures in NSS.
-    pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
+    /// Some keys cannot be inspected in this way.
+    /// Also, internal errors in case of failures in NSS.
+    pub fn key_data<'a>(&'a self) -> Res<&'a [u8]> {
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
 
         let key_item = unsafe { PK11_GetKeyData(self.ptr) };
         // This is accessing a value attached to the key, so we can treat this as a borrow.
         match unsafe { key_item.as_mut() } {
-            None => Err(Error::internal()),
+            None => Err(Error::last()),
             Some(key) => Ok(unsafe { std::slice::from_raw_parts(key.data, key.len as usize) }),
         }
     }
@@ -103,7 +114,7 @@ impl Clone for SymKey {
 
 impl std::fmt::Debug for SymKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Ok(b) = self.as_bytes() {
+        if let Ok(b) = self.key_data() {
             write!(f, "SymKey {}", crate::hex::hex(b))
         } else {
             write!(f, "Opaque SymKey")
@@ -120,6 +131,34 @@ pub fn random(size: usize) -> Vec<u8> {
     })
     .unwrap();
     buf
+}
+
+pub(crate) struct ParamItem<T> {
+    reference: Pin<Box<SECItem>>,
+    params: Vec<u8>,
+    marker: PhantomData<T>,
+}
+
+impl<T: Sized> ParamItem<T> {
+    pub fn new(v: &T) -> Self {
+        let slc =
+            unsafe { std::slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
+        let mut params = Vec::from(slc);
+        let reference = Box::pin(SECItem {
+            type_: SECItemType::siBuffer,
+            data: params.as_mut_ptr() as *mut T as *mut u8,
+            len: c_uint::try_from(params.len()).unwrap(),
+        });
+        Self {
+            reference,
+            params,
+            marker: PhantomData::default(),
+        }
+    }
+
+    pub fn ptr(&mut self) -> *mut SECItem {
+        Pin::into_inner(self.reference.as_mut()) as *mut SECItem
+    }
 }
 
 unsafe fn destroy_secitem(item: *mut SECItem) {
@@ -139,25 +178,11 @@ impl Item {
         }
     }
 
-    /// PKCS#11 interface parameter objects are wrapped in `SECItem`.
-    /// This function wraps any type of parameter by aliasing its memory.
-    pub(crate) fn param_wrap<T: Sized>(v: &T) -> SECItem {
-        SECItem {
-            type_: SECItemType::siBuffer,
-            data: v as *const _ as *mut u8,
-            len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
-        }
-    }
-
-    pub(crate) fn new(ptr: *mut SECItem) -> Res<Self> {
-        match NonNull::new(ptr) {
-            Some(p) => Ok(Item::from_ptr(p)),
-            None => Err(Error::internal()),
-        }
-    }
-
-    /// Massively unsafe.  This dereferences the pointer and makes a copy of the
+    /// This dereferences the pointer held by the item and makes a copy of the
     /// content that is referenced there.
+    ///
+    /// # Safety
+    /// This dereferences two pointers.  It doesn't get much less safe.
     pub(crate) unsafe fn into_vec(self) -> Vec<u8> {
         let b = self.ptr.as_ref().unwrap();
         // Sanity check the type, as some types don't count bytes in `Item::len`.
@@ -181,22 +206,19 @@ pub fn generate_key_pair() -> Res<(PrivateKey, PublicKey)> {
     params.push(u8::try_from(oid.oid.len).unwrap());
     params.extend_from_slice(oid_slc);
 
-    let mut public_ptr: *mut SECKEYPublicKey = null_mut();
-    let secret_ptr = unsafe {
+    let mut pk: *mut SECKEYPublicKey = null_mut();
+    let sk = unsafe {
         PK11_GenerateKeyPair(
             *slot,
             CK_MECHANISM_TYPE::from(CKM_EC_KEY_PAIR_GEN),
             &mut Item::wrap(&params) as *mut _ as *mut c_void,
-            &mut public_ptr,
+            &mut pk,
             PRBool::from(false),
             PRBool::from(true),
             null_mut(),
         )
     };
-    match (NonNull::new(secret_ptr), NonNull::new(public_ptr)) {
-        (Some(sk), Some(pk)) => Ok((PrivateKey::from_ptr(sk), PublicKey::from_ptr(pk))),
-        _ => Err(Error::internal()),
-    }
+    Ok((PrivateKey::from_ptr(sk)?, PublicKey::from_ptr(pk)?))
 }
 
 #[cfg(test)]
