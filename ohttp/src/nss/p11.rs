@@ -107,7 +107,7 @@ impl SymKey {
     /// # Errors
     /// Some keys cannot be inspected in this way.
     /// Also, internal errors in case of failures in NSS.
-    pub fn key_data<'a>(&'a self) -> Res<&'a [u8]> {
+    pub fn key_data(&self) -> Res<&[u8]> {
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
 
         let key_item = unsafe { PK11_GetKeyData(self.ptr) };

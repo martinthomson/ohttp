@@ -1,9 +1,13 @@
+#![deny(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)] // I'm too lazy
+
 mod err;
 mod hex;
 mod nss;
 mod rw;
 
 pub use err::Error;
+pub use nss::init;
 
 use err::Res;
 use nss::aead::{Aead, Mode, NONCE_LEN};
@@ -43,6 +47,7 @@ impl ClientRequest {
     ///   Cipher (32) ...,
     ///   Public Key (..), # no length, this consumes the remainder
     /// }
+    #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
     pub fn new(config: &[u8]) -> Res<Self> {
         let mut r = BufReader::new(config);
         let key_id = read_vec(&mut r)?.ok_or(Error::Truncated)?;
@@ -138,7 +143,7 @@ impl Server {
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
         let mut r = BufReader::new(enc_request);
         let key_id = read_vec(&mut r)?.ok_or(Error::Truncated)?;
-        if &key_id[..] != self.key_id {
+        if key_id[..] != self.key_id {
             return Err(Error::KeyId);
         }
 
@@ -151,7 +156,7 @@ impl Server {
         r.read_to_end(&mut ct)?;
 
         let request = hpke.open(&self.key_id, &ct)?;
-        Ok((request, ServerResponse::new(hpke, self.config, enc)?))
+        Ok((request, ServerResponse::new(&hpke, self.config, enc)?))
     }
 }
 
@@ -161,7 +166,7 @@ fn entropy(config: HpkeConfig) -> usize {
 
 fn make_aead(
     mode: Mode,
-    hpke: Hpke,
+    hpke: &Hpke,
     config: HpkeConfig,
     enc: Vec<u8>,
     response_nonce: &[u8],
@@ -188,9 +193,9 @@ pub struct ServerResponse {
 }
 
 impl ServerResponse {
-    fn new(hpke: Hpke, config: HpkeConfig, enc: Vec<u8>) -> Res<Self> {
+    fn new(hpke: &Hpke, config: HpkeConfig, enc: Vec<u8>) -> Res<Self> {
         let response_nonce = random(entropy(config));
-        let aead = make_aead(Mode::Encrypt, hpke, config, enc, &response_nonce)?;
+        let aead = make_aead(Mode::Encrypt, &hpke, config, enc, &response_nonce)?;
         Ok(Self {
             response_nonce,
             aead,
@@ -227,7 +232,7 @@ impl ClientResponse {
         let (response_nonce, ct) = enc_response.split_at(entropy(self.config));
         let aead = make_aead(
             Mode::Decrypt,
-            self.hpke,
+            &self.hpke,
             self.config,
             self.enc,
             response_nonce,
