@@ -14,7 +14,7 @@ use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
 use nss::hpke::{AeadId, Hpke, HpkeConfig, KdfId, KemId};
 use nss::{random, PrivateKey, PublicKey};
-use rw::{read_uint, read_vec, write_uint, write_varint, write_vec};
+use rw::{read_uint, read_vec, write_uint, write_vec};
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::io::{BufReader, Read};
@@ -35,44 +35,23 @@ pub struct ClientRequest {
 impl ClientRequest {
     /// Reads an encoded configuration and constructs a single use client sender.
     /// Structure is:
-    /// Cipher {
-    ///   KDF (16),
-    ///   AEAD (16),
-    /// }
     /// Config {
     ///   Key ID Length (i),
     ///   Key ID (..),
     ///   KEM (16),
-    ///   Cipher List Length (i),
-    ///   Cipher (32) ...,
+    ///   KDF (16),
+    ///   AEAD (16),
     ///   Public Key (..), # no length, this consumes the remainder
     /// }
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
     pub fn new(config: &[u8]) -> Res<Self> {
         let mut r = BufReader::new(config);
-        let key_id = read_vec(&mut r)?.ok_or(Error::Truncated)?;
+        let key_id = read_vec(&mut r)?;
 
-        let kem = KemId::Type::try_from(read_uint(2, &mut r)?.ok_or(Error::Truncated)?).unwrap();
-        let base_cfg = HpkeConfig::default().kem(kem);
-
-        let ciphers = read_vec(&mut r)?.ok_or(Error::Truncated)?;
-        let mut cipher_r = BufReader::new(&ciphers[..]);
-        // Choose the first set of options that works.
-        // TODO(mt) Choose the one that is most preferred locally.
-        let config = loop {
-            let kdf = if let Some(kdf) = read_uint(2, &mut cipher_r)? {
-                KdfId::Type::try_from(kdf).unwrap()
-            } else {
-                return Err(Error::Unsupported);
-            };
-            let aead =
-                AeadId::Type::try_from(read_uint(2, &mut cipher_r)?.ok_or(Error::Truncated)?)
-                    .unwrap();
-            let config = base_cfg.kdf(kdf).aead(aead);
-            if config.supported() {
-                break config;
-            }
-        };
+        let kem = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let kdf = KdfId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let aead = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let config = HpkeConfig::default().kem(kem).kdf(kdf).aead(aead);
 
         let mut pk_buf = Vec::new();
         let _ = r.read_to_end(&mut pk_buf)?;
@@ -131,8 +110,6 @@ impl Server {
         let mut buf = Vec::new();
         write_vec(&self.key_id, &mut buf)?;
         write_uint(2, self.config.get_kem(), &mut buf)?;
-        // Just one configuration here, so length 4.
-        write_varint(4_u64, &mut buf)?;
         write_uint(2, self.config.get_kdf(), &mut buf)?;
         write_uint(2, self.config.get_aead(), &mut buf)?;
         let mut pk_buf = self.pk.serialize()?;
@@ -142,7 +119,7 @@ impl Server {
 
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
         let mut r = BufReader::new(enc_request);
-        let key_id = read_vec(&mut r)?.ok_or(Error::Truncated)?;
+        let key_id = read_vec(&mut r)?;
         if key_id[..] != self.key_id {
             return Err(Error::KeyId);
         }
