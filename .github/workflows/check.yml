@@ -5,31 +5,49 @@ env:
 
 jobs:
   build_and_test:
-    name: Rust project
+    name: Continuous Integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+
+      - name: Fetch NSS and NSPR
+        run: |
+          apt install mercurial
+          hg clone https://hg.mozilla.org/projects/nspr ./nspr
+          git clone --depth 1 https://github.com/nss-dev/nss ./nss
+
       - uses: actions-rs/cargo@v1
         name: Build
         with:
           command: build
           args: --tests
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
+
       - uses: actions-rs/cargo@v1
-        name: Run tests
+        name: Run Tests
         with:
           command: test
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
+          LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+
       - uses: actions-rs/cargo@v1
         name: Check formatting
         if: ${{ success() || failure() }}
         with:
           command: fmt
           args: --all -- --check
+
       - uses: actions-rs/cargo@v1
         name: Clippy
         if: ${{ success() || failure() }}
         with:
           command: clippy
           args: --tests -- -D warnings
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
