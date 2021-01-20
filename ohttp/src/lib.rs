@@ -245,4 +245,32 @@ mod test {
         let response = client_response.decapsulate(&enc_response).unwrap();
         assert_eq!(&response[..], RESPONSE);
     }
+
+    #[test]
+    fn two_requests() {
+        crate::nss::init();
+
+        let mut server = Server::new(Vec::from(KEY_ID), HpkeConfig::default()).unwrap();
+        let server_cfg = server.encode_config().unwrap();
+
+        let client1 = ClientRequest::new(&server_cfg).unwrap();
+        let (enc_request1, client_response1) = client1.encapsulate(REQUEST).unwrap();
+        let client2 = ClientRequest::new(&server_cfg).unwrap();
+        let (enc_request2, client_response2) = client2.encapsulate(REQUEST).unwrap();
+        assert_ne!(enc_request1, enc_request2);
+
+        let (request1, server_response1) = server.decapsulate(&enc_request1).unwrap();
+        assert_eq!(&request1[..], REQUEST);
+        let (request2, server_response2) = server.decapsulate(&enc_request2).unwrap();
+        assert_eq!(&request2[..], REQUEST);
+
+        let enc_response1 = server_response1.encapsulate(RESPONSE).unwrap();
+        let enc_response2 = server_response2.encapsulate(RESPONSE).unwrap();
+        assert_ne!(enc_response1, enc_response2);
+
+        let response1 = client_response1.decapsulate(&enc_response1).unwrap();
+        assert_eq!(&response1[..], RESPONSE);
+        let response2 = client_response2.decapsulate(&enc_response2).unwrap();
+        assert_eq!(&response2[..], RESPONSE);
+    }
 }
