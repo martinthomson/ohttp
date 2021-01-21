@@ -1,7 +1,9 @@
 #![deny(clippy::pedantic)]
 
 use bhttp::{Message, Mode};
+use std::fs::File;
 use std::io;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -10,13 +12,25 @@ use structopt::StructOpt;
     about = "Translator between message/http and message/bhttp."
 )]
 struct Args {
+    /// Both read and produce message/bhttp.
+    #[structopt(long, short = "b")]
+    binary: bool,
+
     /// Decode message/bhttp and produce message/http instead.
     #[structopt(long, short = "d")]
     decode: bool,
 
     /// When creating message/bhttp, use the indefinite-length form.
-    #[structopt(long, short = "i")]
+    #[structopt(long, short = "n")]
     indefinite: bool,
+
+    /// Input file.
+    #[structopt(long, short = "i")]
+    input: Option<PathBuf>,
+
+    /// Output file.
+    #[structopt(long, short = "o")]
+    output: Option<PathBuf>,
 }
 
 impl Args {
@@ -32,12 +46,27 @@ impl Args {
 fn main() -> Result<(), bhttp::Error> {
     let args = Args::from_args();
 
-    if args.decode {
-        let m = Message::read_bhttp(&mut io::BufReader::new(std::io::stdin()))?;
-        m.write_http(&mut std::io::stdout())?;
+    let mut input: Box<dyn io::BufRead> = if let Some(infile) = &args.input {
+        Box::new(io::BufReader::new(File::open(infile)?))
     } else {
-        let m = Message::read_http(&mut io::BufReader::new(std::io::stdin()))?;
-        m.write_bhttp(args.mode(), &mut std::io::stdout())?;
+        Box::new(io::BufReader::new(std::io::stdin()))
+    };
+
+    let m = if args.binary || args.decode {
+        Message::read_bhttp(&mut input)?
+    } else {
+        Message::read_http(&mut input)?
+    };
+
+    let mut output: Box<dyn io::Write> = if let Some(outfile) = &args.output {
+        Box::new(File::open(outfile)?)
+    } else {
+        Box::new(std::io::stdout())
+    };
+    if args.binary || !args.decode {
+        m.write_bhttp(args.mode(), &mut output)?;
+    } else {
+        m.write_http(&mut output)?;
     }
     Ok(())
 }

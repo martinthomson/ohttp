@@ -1,3 +1,10 @@
+HTTP/1.1 102 Processing
+Running: "sleep 15"
+
+HTTP/1.1 103 Early Hints
+Link: </style.css>; rel=preload; as=style
+Link: </script.js>; rel=preload; as=script
+
 HTTP/1.1 200 OK
 Date: Mon, 27 Jul 2009 12:28:53 GMT
 Server: Apache

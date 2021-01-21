@@ -26,8 +26,6 @@ use rw::{write_len, write_varint, write_vec};
 const CONTENT_LENGTH: &[u8] = b"content-length";
 #[cfg(feature = "read-bhttp")]
 const COOKIE: &[u8] = b"cookie";
-#[cfg(feature = "write-bhttp")]
-const HOST: &[u8] = b"host";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
 
@@ -121,6 +119,42 @@ impl FieldSection {
         } else {
             false
         }
+    }
+
+    /// As required by the HTTP specification, remove the Connection header
+    /// field, everything it refers to, and a few extra fields.
+    fn strip_connection_headers(&mut self) {
+        const CONNECTION: &[u8] = b"connection";
+        const SHOULD_REMOVE: &[&[u8]] = &[
+            b"connection",
+            b"keep-alive",
+            b"proxy-connection",
+            b"te",
+            b"trailer",
+            b"transfer-encoding",
+            b"upgrade",
+        ];
+        let mut listed = Vec::new();
+        let mut track = |n| {
+            let mut name = Vec::from(trim_ows(n));
+            downcase(&mut name);
+            if !listed.contains(&name) {
+                listed.push(name);
+            }
+        };
+
+        for f in self.0.iter().filter(|f| f.name() == CONNECTION) {
+            let mut v = f.value();
+            while let Some(i) = index_of(COMMA, v) {
+                track(&v[..i]);
+                v = &v[i + 1..];
+            }
+            track(v);
+        }
+
+        self.0.retain(|f| {
+            !SHOULD_REMOVE.contains(&f.name()) && listed.iter().all(|x| &x[..] != f.name())
+        });
     }
 
     #[cfg(feature = "read-http")]
@@ -326,41 +360,36 @@ impl ControlData {
     }
 
     #[cfg(feature = "write-bhttp")]
-    pub fn write_bhttp(&self, host: Option<&[u8]>, w: &mut impl io::Write) -> Res<()> {
+    pub fn write_bhttp(&self, w: &mut impl io::Write) -> Res<()> {
         match self {
             Self::Request { method, url } => {
                 write_vec(method, w)?;
 
                 // Now try to parse the URL.
                 let url_str = String::from_utf8(url.clone())?;
-                let parsed = if let Ok(parsed) = Url::parse(&url_str) {
-                    parsed
-                } else if let Some(host) = host {
-                    // Try to use the host header to fill in the request.
-                    let mut buf = Vec::new();
-                    buf.extend_from_slice(b"https://");
-                    buf.extend_from_slice(host);
-                    buf.extend_from_slice(url);
-                    let url_str = String::from_utf8(buf)?;
-                    Url::parse(&url_str)?
+                if let Ok(parsed) = Url::parse(&url_str) {
+                    write_vec(parsed.scheme().as_bytes(), w)?;
+                    let authority = parsed.host_str().map_or_else(String::new, |host| {
+                        let mut authority = String::from(host);
+                        if let Some(port) = parsed.port() {
+                            authority.push(':');
+                            authority.push_str(&port.to_string());
+                        }
+                        authority
+                    });
+                    write_vec(authority.as_bytes(), w)?;
+                    let mut path = String::from(parsed.path());
+                    if let Some(q) = parsed.query() {
+                        path.push('?');
+                        path.push_str(q);
+                    }
+                    write_vec(path.as_bytes(), w)?;
                 } else {
-                    return Err(Error::MissingUrlComponent);
-                };
-
-                write_vec(parsed.scheme().as_bytes(), w)?;
-                let mut authority =
-                    String::from(parsed.host_str().ok_or(Error::MissingUrlComponent)?);
-                if let Some(port) = parsed.port() {
-                    authority.push(':');
-                    authority.push_str(&port.to_string());
+                    // No authority form URL, we have to use HTTP/2 rules.
+                    write_vec(b"https", w)?;
+                    write_vec(b"", w)?;
+                    write_vec(url, w)?;
                 }
-                write_vec(authority.as_bytes(), w)?;
-                let mut path = String::from(parsed.path());
-                if let Some(q) = parsed.query() {
-                    path.push('?');
-                    path.push_str(q);
-                }
-                write_vec(path.as_bytes(), w)?;
             }
             Self::Response(status) => write_varint(*status, w)?,
         }
@@ -480,7 +509,7 @@ impl Message {
             control = ControlData::read_http(line)?;
         }
 
-        let header = FieldSection::read_http(r)?;
+        let mut header = FieldSection::read_http(r)?;
 
         let (content, trailer) = if matches!(control.status(), Some(204) | Some(304)) {
             // 204 and 304 have no body, no matter what Content-Length says.
@@ -504,6 +533,8 @@ impl Message {
             }
             (content, FieldSection::default())
         };
+
+        header.strip_connection_headers();
         Ok(Self {
             informational,
             control,
@@ -583,10 +614,11 @@ impl Message {
         for info in &self.informational {
             info.write_bhttp(mode, w)?;
         }
-        self.control.write_bhttp(self.header.get(HOST), w)?;
+        self.control.write_bhttp(w)?;
         self.header.write_bhttp(mode, w)?;
+
         write_vec(&self.content, w)?;
-        if mode == Mode::IndefiniteLength {
+        if mode == Mode::IndefiniteLength && !self.content.is_empty() {
             write_len(0, w)?;
         }
         self.trailer.write_bhttp(mode, w)?;
