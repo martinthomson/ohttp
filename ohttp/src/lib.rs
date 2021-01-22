@@ -204,12 +204,14 @@ impl ClientRequest {
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
-        let mut ct = self.hpke.seal(&[self.key_id], request)?;
-        let enc = self.hpke.enc()?;
+        // AAD is keyID + kdfID + aeadID:
         let mut enc_request = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut enc_request)?;
         write_uint(2, self.hpke.kdf(), &mut enc_request)?;
         write_uint(2, self.hpke.aead(), &mut enc_request)?;
+
+        let mut ct = self.hpke.seal(&enc_request, request)?;
+        let enc = self.hpke.enc()?;
         enc_request.extend_from_slice(&enc);
         enc_request.append(&mut ct);
         Ok((enc_request, ClientResponse::new(self.hpke, enc)))
@@ -238,15 +240,19 @@ impl Server {
     }
 
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
+        const AAD_LEN: usize = size_of::<KeyId>() + 4;
+        if enc_request.len() < AAD_LEN {
+            return Err(Error::Truncated);
+        }
+        let aad = &enc_request[..AAD_LEN];
         let mut r = BufReader::new(enc_request);
-        let key_id = u8::try_from(read_uint(1, &mut r)?).unwrap();
+        let key_id = u8::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
         if key_id != self.config.key_id {
             return Err(Error::KeyId);
         }
-
-        let kdf = KdfId::Type::try_from(read_uint(2, &mut r)?).unwrap();
-        let aead = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();
-        let sym = SymmetricSuite::new(kdf, aead);
+        let kdf_id = KdfId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let aead_id = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let sym = SymmetricSuite::new(kdf_id, aead_id);
 
         let mut hpke = self.config.create_hpke(sym)?;
         let mut enc = vec![0; hpke.n_enc()];
@@ -261,7 +267,7 @@ impl Server {
         let mut ct = Vec::new();
         r.read_to_end(&mut ct)?;
 
-        let request = hpke.open(&[self.config.key_id], &ct)?;
+        let request = hpke.open(aad, &ct)?;
         Ok((request, ServerResponse::new(&hpke, enc)?))
     }
 }
