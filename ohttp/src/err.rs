@@ -2,6 +2,8 @@
 pub enum Error {
     /// A problem occurred during cryptographic processing.
     Crypto(crate::nss::Error),
+    /// An error was found in the format.
+    Format,
     /// An IO error.
     Io(std::io::Error),
     /// The key ID was invalid.

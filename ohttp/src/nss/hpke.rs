@@ -2,14 +2,13 @@ use super::err::{sec::SEC_ERROR_INVALID_ARGS, Error, Res};
 use super::p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey};
 use super::secstatus_to_res;
 use std::convert::TryFrom;
+use std::ops::Deref;
 use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut};
 
 pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
 
 /// Configuration for `Hpke`.
-/// As there are relatively few options, use the builder pattern
-/// with a sensible default.
 #[derive(Clone, Copy)]
 pub struct HpkeConfig {
     kem: KemId::Type,
@@ -18,30 +17,19 @@ pub struct HpkeConfig {
 }
 
 impl HpkeConfig {
-    pub fn kem(mut self, kem: KemId::Type) -> Self {
-        self.kem = kem;
-        self
+    pub fn new(kem: KemId::Type, kdf: KdfId::Type, aead: AeadId::Type) -> Self {
+        Self { kem, kdf, aead }
     }
 
-    pub fn get_kem(&self) -> KemId::Type {
+    pub fn kem(&self) -> KemId::Type {
         self.kem
     }
 
-    pub fn kdf(mut self, kdf: KdfId::Type) -> Self {
-        self.kdf = kdf;
-        self
-    }
-
-    pub fn get_kdf(&self) -> KdfId::Type {
+    pub fn kdf(&self) -> KdfId::Type {
         self.kdf
     }
 
-    pub fn aead(mut self, aead: AeadId::Type) -> Self {
-        self.aead = aead;
-        self
-    }
-
-    pub fn get_aead(&self) -> AeadId::Type {
+    pub fn aead(&self) -> AeadId::Type {
         self.aead
     }
 
@@ -109,6 +97,10 @@ impl Hpke {
         })
     }
 
+    pub fn config(&self) -> HpkeConfig {
+        self.config
+    }
+
     pub fn decode_public_key(&self, k: &[u8]) -> Res<PublicKey> {
         let mut ptr: *mut sys::SECKEYPublicKey = null_mut();
         secstatus_to_res(unsafe {
@@ -124,7 +116,7 @@ impl Hpke {
 
     /// Generate a key pair for the KEM.
     pub fn generate_key_pair(&self) -> Res<(PrivateKey, PublicKey)> {
-        assert_eq!(self.config.get_kem(), KemId::HpkeDhKemX25519Sha256);
+        assert_eq!(self.config.kem(), KemId::HpkeDhKemX25519Sha256);
         let slot = Slot::internal()?;
 
         let oid_data = unsafe { sys::SECOID_FindOIDByTag(sys::SECOidTag::SEC_OID_CURVE25519) };
@@ -227,6 +219,13 @@ impl Hpke {
     }
 }
 
+impl Deref for Hpke {
+    type Target = HpkeConfig;
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::init;
@@ -251,7 +250,10 @@ mod test {
 
         // Setup
         init();
-        let cfg = HpkeConfig::default().aead(aead);
+        let cfg = HpkeConfig {
+            aead,
+            ..HpkeConfig::default()
+        };
         assert!(cfg.supported());
         let mut hpke_s = Hpke::new(cfg).unwrap();
         let mut hpke_r = Hpke::new(cfg).unwrap();
@@ -281,8 +283,20 @@ mod test {
 
     #[test]
     fn bogus_config() {
-        assert!(!HpkeConfig::default().aead(99).supported());
-        assert!(!HpkeConfig::default().kem(99).supported());
-        assert!(!HpkeConfig::default().kdf(99).supported());
+        assert!(!HpkeConfig {
+            kem: 99_999,
+            ..HpkeConfig::default()
+        }
+        .supported());
+        assert!(!HpkeConfig {
+            kdf: 99_999,
+            ..HpkeConfig::default()
+        }
+        .supported());
+        assert!(!HpkeConfig {
+            aead: 99_999,
+            ..HpkeConfig::default()
+        }
+        .supported());
     }
 }

@@ -51,7 +51,6 @@ fn main() -> Result<(), bhttp::Error> {
     } else {
         Box::new(io::BufReader::new(std::io::stdin()))
     };
-
     let m = if args.binary || args.decode {
         Message::read_bhttp(&mut input)?
     } else {
