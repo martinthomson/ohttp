@@ -265,7 +265,12 @@ impl FieldSection {
 }
 
 pub enum ControlData {
-    Request { method: Vec<u8>, url: Vec<u8> },
+    Request {
+        method: Vec<u8>,
+        scheme: Vec<u8>,
+        authority: Vec<u8>,
+        path: Vec<u8>,
+    },
     Response(StatusCode),
 }
 
@@ -285,9 +290,35 @@ impl ControlData {
     }
 
     #[must_use]
-    pub fn url(&self) -> Option<&[u8]> {
-        if let Self::Request { url, .. } = self {
-            Some(url)
+    pub fn scheme(&self) -> Option<&[u8]> {
+        if let Self::Request { scheme, .. } = self {
+            Some(scheme)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn authority(&self) -> Option<&[u8]> {
+        if let Self::Request { authority, .. } = self {
+            if authority.is_empty() {
+                None
+            } else {
+                Some(authority)
+            }
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn path(&self) -> Option<&[u8]> {
+        if let Self::Request { path, .. } = self {
+            if path.is_empty() {
+                None
+            } else {
+                Some(path)
+            }
         } else {
             None
         }
@@ -308,30 +339,59 @@ impl ControlData {
         //  status-line = HTTP-version SP status-code SP [reason-phrase]
         let (a, r) = split_at(SP, line).ok_or(Error::Missing(SP))?;
         let (b, _) = split_at(SP, r).ok_or(Error::Missing(SP))?;
-        Ok(if index_of(SLASH, &a).is_some() {
+        if index_of(SLASH, &a).is_some() {
             // Probably a response, so treat it as such.
             let status_str = String::from_utf8(b)?;
             let code = status_str.parse::<u16>()?;
-            Self::Response(code)
+            Ok(Self::Response(code))
         } else {
-            Self::Request { method: a, url: b }
-        })
+            if index_of(COLON, &b).is_some() {
+                // Now try to parse the URL.
+                let url_str = String::from_utf8(b)?;
+                let parsed = Url::parse(&url_str)?;
+                let authority = parsed.host_str().map_or_else(String::new, |host| {
+                    let mut authority = String::from(host);
+                    if let Some(port) = parsed.port() {
+                        authority.push(':');
+                        authority.push_str(&port.to_string());
+                    }
+                    authority
+                });
+                let mut path = String::from(parsed.path());
+                if let Some(q) = parsed.query() {
+                    path.push('?');
+                    path.push_str(q);
+                }
+                Ok(Self::Request {
+                    method: a,
+                    scheme: Vec::from(parsed.scheme().as_bytes()),
+                    authority: Vec::from(authority.as_bytes()),
+                    path: Vec::from(path.as_bytes()),
+                })
+            } else {
+                Ok(Self::Request {
+                    method: a,
+                    scheme: Vec::from(&b"https"[..]),
+                    authority: Vec::new(),
+                    path: b,
+                })
+            }
+        }
     }
 
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(request: bool, r: &mut impl io::BufRead) -> Res<Self> {
         let v = if request {
             let method = read_vec(r)?.ok_or(Error::Truncated)?;
-            let mut url = Vec::new();
-            let mut scheme = read_vec(r)?.ok_or(Error::Truncated)?;
-            url.append(&mut scheme);
-            url.extend_from_slice(b"://");
-            let mut authority = read_vec(r)?.ok_or(Error::Truncated)?;
-            url.append(&mut authority);
-            let mut path = read_vec(r)?.ok_or(Error::Truncated)?;
-            url.append(&mut path);
-
-            Self::Request { method, url }
+            let scheme = read_vec(r)?.ok_or(Error::Truncated)?;
+            let authority = read_vec(r)?.ok_or(Error::Truncated)?;
+            let path = read_vec(r)?.ok_or(Error::Truncated)?;
+            Self::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            }
         } else {
             Self::Response(u16::try_from(read_varint(r)?.ok_or(Error::Truncated)?)?)
         };
@@ -353,8 +413,8 @@ impl ControlData {
     fn code(&self, mode: Mode) -> u64 {
         match (self, mode) {
             (Self::Request { .. }, Mode::KnownLength) => 0,
-            (Self::Request { .. }, Mode::IndefiniteLength) => 1,
-            (Self::Response(_), Mode::KnownLength) => 2,
+            (Self::Response(_), Mode::KnownLength) => 1,
+            (Self::Request { .. }, Mode::IndefiniteLength) => 2,
             (Self::Response(_), Mode::IndefiniteLength) => 3,
         }
     }
@@ -362,34 +422,16 @@ impl ControlData {
     #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, w: &mut impl io::Write) -> Res<()> {
         match self {
-            Self::Request { method, url } => {
+            Self::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            } => {
                 write_vec(method, w)?;
-
-                // Now try to parse the URL.
-                let url_str = String::from_utf8(url.clone())?;
-                if let Ok(parsed) = Url::parse(&url_str) {
-                    write_vec(parsed.scheme().as_bytes(), w)?;
-                    let authority = parsed.host_str().map_or_else(String::new, |host| {
-                        let mut authority = String::from(host);
-                        if let Some(port) = parsed.port() {
-                            authority.push(':');
-                            authority.push_str(&port.to_string());
-                        }
-                        authority
-                    });
-                    write_vec(authority.as_bytes(), w)?;
-                    let mut path = String::from(parsed.path());
-                    if let Some(q) = parsed.query() {
-                        path.push('?');
-                        path.push_str(q);
-                    }
-                    write_vec(path.as_bytes(), w)?;
-                } else {
-                    // No authority form URL, we have to use HTTP/2 rules.
-                    write_vec(b"https", w)?;
-                    write_vec(b"", w)?;
-                    write_vec(url, w)?;
-                }
+                write_vec(scheme, w)?;
+                write_vec(authority, w)?;
+                write_vec(path, w)?;
             }
             Self::Response(status) => write_varint(*status, w)?,
         }
@@ -399,10 +441,20 @@ impl ControlData {
     #[cfg(feature = "write-http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         match self {
-            Self::Request { method, url } => {
+            Self::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            } => {
                 w.write_all(method)?;
                 w.write_all(b" ")?;
-                w.write_all(url)?;
+                if !authority.is_empty() {
+                    w.write_all(scheme)?;
+                    w.write_all(b"://")?;
+                    w.write_all(authority)?;
+                }
+                w.write_all(path)?;
                 w.write_all(b" HTTP/1.1\r\n")?;
             }
             Self::Response(status) => {
@@ -570,10 +622,10 @@ impl Message {
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(r: &mut impl io::BufRead) -> Res<Self> {
         let t = read_varint(r)?.ok_or(Error::Truncated)?;
-        let request = t == 0 || t == 1;
+        let request = t == 0 || t == 2;
         let mode = match t {
-            0 | 2 => Mode::KnownLength,
-            1 | 3 => Mode::IndefiniteLength,
+            0 | 1 => Mode::KnownLength,
+            2 | 3 => Mode::IndefiniteLength,
             _ => panic!("Unsupported mode"),
         };
 
