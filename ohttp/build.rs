@@ -290,24 +290,24 @@ fn pkg_config() -> Vec<String> {
     let provides = Command::new("pkg-config")
         .args(&["--modversion", "nss"])
         .output()
-        .expect("couldn't start NSS build")
+        .expect("pkg-config reports NSS as absent")
         .stdout;
     let provides_str = String::from_utf8(provides).expect("non-UTF8 from pkg-config");
     let mut it = provides_str.split('.');
     if it.next() != Some("3") {
-        panic!("NSS version 3.62 or higher is needed");
+        panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
     }
     if let Some(minor) = it.next() {
-        let v = minor.parse::<u32>().expect("NSS minor version is a number");
+        let v = minor.parse::<u32>().expect("NSS minor version is not a number");
         if v < 62 {
-            panic!("NSS version 3.62 or higher is needed");
+            panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
         }
     }
 
     let cfg = Command::new("pkg-config")
         .args(&["--cflags", "--libs", "nss"])
         .output()
-        .expect("couldn't start NSS build")
+        .expect("NSS flags not returned by pkg-config")
         .stdout;
     let cfg_str = String::from_utf8(cfg).expect("non-UTF8 from pkg-config");
 
