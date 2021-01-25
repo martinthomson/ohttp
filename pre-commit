@@ -34,3 +34,6 @@ if ! errors=($(cargo fmt -- --check -l)); then
     done
     exit 1
 fi
+if ! cargo clippy --tests; then
+    exit 1
+fi
