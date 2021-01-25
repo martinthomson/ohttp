@@ -353,38 +353,36 @@ impl ControlData {
             let status_str = String::from_utf8(b)?;
             let code = status_str.parse::<u16>()?;
             Ok(Self::Response(code))
-        } else {
-            if index_of(COLON, &b).is_some() {
-                // Now try to parse the URL.
-                let url_str = String::from_utf8(b)?;
-                let parsed = Url::parse(&url_str)?;
-                let authority = parsed.host_str().map_or_else(String::new, |host| {
-                    let mut authority = String::from(host);
-                    if let Some(port) = parsed.port() {
-                        authority.push(':');
-                        authority.push_str(&port.to_string());
-                    }
-                    authority
-                });
-                let mut path = String::from(parsed.path());
-                if let Some(q) = parsed.query() {
-                    path.push('?');
-                    path.push_str(q);
+        } else if index_of(COLON, &b).is_some() {
+            // Now try to parse the URL.
+            let url_str = String::from_utf8(b)?;
+            let parsed = Url::parse(&url_str)?;
+            let authority = parsed.host_str().map_or_else(String::new, |host| {
+                let mut authority = String::from(host);
+                if let Some(port) = parsed.port() {
+                    authority.push(':');
+                    authority.push_str(&port.to_string());
                 }
-                Ok(Self::Request {
-                    method: a,
-                    scheme: Vec::from(parsed.scheme().as_bytes()),
-                    authority: Vec::from(authority.as_bytes()),
-                    path: Vec::from(path.as_bytes()),
-                })
-            } else {
-                Ok(Self::Request {
-                    method: a,
-                    scheme: Vec::from(&b"https"[..]),
-                    authority: Vec::new(),
-                    path: b,
-                })
+                authority
+            });
+            let mut path = String::from(parsed.path());
+            if let Some(q) = parsed.query() {
+                path.push('?');
+                path.push_str(q);
             }
+            Ok(Self::Request {
+                method: a,
+                scheme: Vec::from(parsed.scheme().as_bytes()),
+                authority: Vec::from(authority.as_bytes()),
+                path: Vec::from(path.as_bytes()),
+            })
+        } else {
+            Ok(Self::Request {
+                method: a,
+                scheme: Vec::from(&b"https"[..]),
+                authority: Vec::new(),
+                path: b,
+            })
         }
     }
 

@@ -253,7 +253,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String]) {
         .expect("couldn't write bindings");
 }
 
-fn build(nss: PathBuf) -> Vec<String> {
+fn build(nss: &PathBuf) -> Vec<String> {
     setup_clang();
 
     build_nss(nss.clone());
@@ -315,13 +315,13 @@ fn pkg_config() -> Vec<String> {
 
     let mut flags: Vec<String> = Vec::new();
     for f in cfg_str.split(' ') {
-        if f.starts_with("-I") {
+        if let Some(include) = f.strip_prefix("-I") {
             flags.push(String::from(f));
-            println!("cargo:include={}", &f[2..]);
-        } else if f.starts_with("-L") {
-            println!("cargo:rustc-link-search=native={}", &f[2..]);
-        } else if f.starts_with("-l") {
-            println!("cargo:rustc-link-lib=dylib={}", &f[2..]);
+            println!("cargo:include={}", include);
+        } else if let Some(path) = f.strip_prefix("-L") {
+            println!("cargo:rustc-link-search=native={}", path);
+        } else if let Some(lib) = f.strip_prefix("-l") {
+            println!("cargo:rustc-link-lib=dylib={}", lib);
         } else {
             println!("Warning: Unknown flag from pkg-config: {}", f);
         }
@@ -332,11 +332,7 @@ fn pkg_config() -> Vec<String> {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
-    let flags = if let Some(nss) = nss_dir() {
-        build(nss)
-    } else {
-        pkg_config()
-    };
+    let flags = nss_dir().map_or_else(pkg_config, |nss| build(&nss));
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
