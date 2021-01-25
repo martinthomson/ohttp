@@ -287,21 +287,21 @@ fn build(nss: &PathBuf) -> Vec<String> {
 }
 
 fn pkg_config() -> Vec<String> {
-    let provides = Command::new("pkg-config")
+    let modversion = Command::new("pkg-config")
         .args(&["--modversion", "nss"])
         .output()
         .expect("pkg-config reports NSS as absent")
         .stdout;
-    let provides_str = String::from_utf8(provides).expect("non-UTF8 from pkg-config");
-    let mut it = provides_str.split('.');
-    if it.next() != Some("3") {
+    let modversion_str = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
+    let mut v = modversion_str.split('.');
+    if v.next() != Some("3") {
         panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
     }
-    if let Some(minor) = it.next() {
-        let v = minor
+    if let Some(minor) = v.next() {
+        let minor = minor
             .parse::<u32>()
             .expect("NSS minor version is not a number");
-        if v < 62 {
+        if minor < 62 {
             panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
         }
     }
