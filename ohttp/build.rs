@@ -298,7 +298,9 @@ fn pkg_config() -> Vec<String> {
         panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
     }
     if let Some(minor) = it.next() {
-        let v = minor.parse::<u32>().expect("NSS minor version is not a number");
+        let v = minor
+            .parse::<u32>()
+            .expect("NSS minor version is not a number");
         if v < 62 {
             panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
         }
