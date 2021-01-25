@@ -68,9 +68,17 @@ async fn serve(
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(ohttp, &body[..], mode) {
         Ok(resp) => Ok(warp::http::Response::builder().body(resp)),
-        Err(e) => Ok(warp::http::Response::builder()
-            .status(400)
-            .body(Vec::from(format!("Error: {:?}", e).as_bytes()))),
+        Err(e) => {
+            if let Ok(oe) = e.downcast::<::ohttp::Error>() {
+                Ok(warp::http::Response::builder()
+                    .status(422)
+                    .body(Vec::from(format!("Error: {:?}", oe).as_bytes())))
+            } else {
+                Ok(warp::http::Response::builder()
+                    .status(400)
+                    .body(Vec::from(&b"Request error"[..])))
+            }
+        }
     }
 }
 
