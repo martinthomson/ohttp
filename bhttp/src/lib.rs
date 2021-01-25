@@ -4,7 +4,7 @@
 #[cfg(feature = "read-bhttp")]
 use std::convert::TryFrom;
 use std::io;
-#[cfg(feature = "write-bhttp")]
+#[cfg(feature = "read-http")]
 use url::Url;
 
 mod err;
@@ -101,6 +101,14 @@ impl FieldSection {
         None
     }
 
+    pub fn put(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
+        self.0.push(Field::new(name.into(), value.into()))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Field> {
+        self.0.iter()
+    }
+
     #[must_use]
     pub fn fields(&self) -> &[Field] {
         &self.0
@@ -123,6 +131,7 @@ impl FieldSection {
 
     /// As required by the HTTP specification, remove the Connection header
     /// field, everything it refers to, and a few extra fields.
+    #[cfg(feature = "read-http")]
     fn strip_connection_headers(&mut self) {
         const CONNECTION: &[u8] = b"connection";
         const SHOULD_REMOVE: &[&[u8]] = &[
@@ -505,6 +514,45 @@ pub struct Message {
 
 impl Message {
     #[must_use]
+    pub fn request(method: Vec<u8>, scheme: Vec<u8>, authority: Vec<u8>, path: Vec<u8>) -> Self {
+        Self {
+            informational: Vec::new(),
+            control: ControlData::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            },
+            header: FieldSection::default(),
+            content: Vec::new(),
+            trailer: FieldSection::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn response(status: StatusCode) -> Self {
+        Self {
+            informational: Vec::new(),
+            control: ControlData::Response(status),
+            header: FieldSection::default(),
+            content: Vec::new(),
+            trailer: FieldSection::default(),
+        }
+    }
+
+    pub fn put_header(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
+        self.header.put(name, value);
+    }
+
+    pub fn put_trailer(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
+        self.trailer.put(name, value);
+    }
+
+    pub fn write_content(&mut self, d: impl AsRef<[u8]>) {
+        self.content.extend_from_slice(d.as_ref());
+    }
+
+    #[must_use]
     pub fn informational(&self) -> &[InformationalResponse] {
         &self.informational
     }
@@ -603,17 +651,22 @@ impl Message {
             info.fields().write_http(w)?;
         }
         self.control.write_http(w)?;
-        let need_chunked = !self.trailer.is_empty() && !self.header.is_chunked();
-        self.header.write_http(w)?;
-        if need_chunked {
-            write!(w, "Transfer-Encoding: chunked\r\n")?;
+        if !self.content.is_empty() {
+            if self.trailer.is_empty() {
+                write!(w, "Content-Length: {}\r\n", self.content.len())?
+            } else {
+                w.write_all(b"Transfer-Encoding: chunked\r\n")?;
+            }
         }
+        self.header.write_http(w)?;
 
         if self.header.is_chunked() {
             write!(w, "{:x}\r\n", self.content.len())?;
             w.write_all(&self.content)?;
             w.write_all(b"\r\n0\r\n")?;
             self.trailer.write_http(w)?;
+        } else {
+            w.write_all(&self.content)?;
         }
 
         Ok(())

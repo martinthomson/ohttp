@@ -70,6 +70,8 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
+unsafe impl Send for PrivateKey {}
+
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
 impl PublicKey {
@@ -89,6 +91,8 @@ impl PublicKey {
         Ok(buf)
     }
 }
+
+unsafe impl Send for PublicKey {}
 
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
@@ -137,6 +141,8 @@ impl std::fmt::Debug for SymKey {
         }
     }
 }
+
+unsafe impl Send for SymKey {}
 
 /// Generate a randomized buffer.
 #[must_use]

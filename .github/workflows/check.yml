@@ -17,10 +17,25 @@ jobs:
 
       - name: Install Build Prerequisites for NSS
         run: |
-          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
-            ca-certificates coreutils curl git make mercurial ssh \
-            build-essential clang llvm libclang-dev lld \
-            gyp ninja-build pkg-config zlib1g-dev
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
+            build-essential \
+            ca-certificates \
+            clang \
+            coreutils \
+            curl \
+            git \
+            gyp \
+            libclang-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            make \
+            mercurial \
+            ninja-build \
+            pkg-config \
+            ssh \
+            zlib1g-dev \
+            --no-install-recommends
 
       - name: Fetch NSS and NSPR
         run: |

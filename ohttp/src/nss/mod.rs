@@ -59,8 +59,6 @@ lazy_static! {
         }
 
         secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-        secstatus_to_res(unsafe { nss_init::NSS_SetDomesticPolicy() })
-            .expect("NSS_SetDomesticPolicy failed");
 
         NssLoaded::NoDb
     };

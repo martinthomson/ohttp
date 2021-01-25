@@ -7,12 +7,13 @@ mod nss;
 mod rw;
 
 pub use err::Error;
+pub use nss::hpke::{AeadId, KdfId, KemId};
 pub use nss::init;
 
 use err::Res;
 use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
-use nss::hpke::{AeadId, Hpke, HpkeConfig, KdfId, KemId};
+use nss::hpke::{Hpke, HpkeConfig};
 use nss::{random, PrivateKey, PublicKey};
 use rw::{read_uint, read_uvec, write_uint, write_uvec};
 use std::cmp::max;
@@ -178,6 +179,7 @@ impl KeyConfig {
 
 /// This is the sort of information we expect to receive from the receiver.
 /// This might not be necessary if we agree on a format.
+#[cfg(feature = "client")]
 pub struct ClientRequest {
     key_id: KeyId,
     hpke: Hpke,
@@ -221,6 +223,7 @@ impl ClientRequest {
 /// A server can handle multiple requests.
 /// It holds a single key pair and can generate a configuration.
 /// (A more complex server would have multiple key pairs. This is simple.)
+#[cfg(feature = "server")]
 pub struct Server {
     config: KeyConfig,
 }
@@ -293,6 +296,7 @@ fn make_aead(mode: Mode, hpke: &Hpke, enc: Vec<u8>, response_nonce: &[u8]) -> Re
 
 /// An object for encapsulating responses.
 /// The only way to obtain one of these is through `Server::decapsulate()`.
+#[cfg(feature = "server")]
 pub struct ServerResponse {
     response_nonce: Vec<u8>,
     aead: Aead,
@@ -319,6 +323,7 @@ impl ServerResponse {
 
 /// An object for decapsulating responses.
 /// The only way to obtain one of these is through `ClientRequest::encapsulate()`.
+#[cfg(feature = "client")]
 pub struct ClientResponse {
     hpke: Hpke,
     enc: Vec<u8>,
@@ -340,7 +345,7 @@ impl ClientResponse {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
     use crate::nss::hpke::{AeadId, KdfId, KemId};
     use crate::{ClientRequest, KeyConfig, KeyId, Server, SymmetricSuite};

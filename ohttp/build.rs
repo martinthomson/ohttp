@@ -133,9 +133,9 @@ fn build_nss(dir: PathBuf) {
 
 fn dynamic_link() {
     let libs = if env::consts::OS == "windows" {
-        &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+        &["nssutil3.dll", "nss3.dll"]
     } else {
-        &["nssutil3", "nss3", "ssl3"]
+        &["nssutil3", "nss3"]
     };
     dynamic_link_both(libs);
 }
@@ -167,7 +167,6 @@ fn static_link() {
         "pkcs7",
         "smime",
         "softokn_static",
-        "ssl",
     ];
     if env::consts::OS != "macos" {
         static_libs.push("sqlite");

@@ -5,6 +5,11 @@ authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 build = "build.rs"
 
+[features]
+default = ["client", "server"]
+client = []
+server = []
+
 [dependencies]
 lazy_static = "1.4"
 

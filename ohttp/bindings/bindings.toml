@@ -29,7 +29,6 @@ enums = ["SECErrorCodes"]
 functions = [
     "NSS_IsInitialized",
     "NSS_NoDB_Init",
-    "NSS_SetDomesticPolicy",
     "NSS_Shutdown",
 ]
 
