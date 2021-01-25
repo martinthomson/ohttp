@@ -15,7 +15,7 @@ hash cargo || exit 1
 if [[ "$1" == "install" ]]; then
     hook="$root"/.git/hooks/pre-commit
     if [[ ! -e "$hook" ]]; then
-        ln -s ../../hooks/pre-commit "$hook"
+        ln -s ../../pre-commit "$hook"
         echo "Installed git pre-commit hook at $hook"
     else
         echo "Hook already installed"
