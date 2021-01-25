@@ -89,14 +89,14 @@ fn setup_clang() {
     }
 }
 
-fn nss_dir() -> PathBuf {
-    let dir = env::var("NSS_DIR")
-        .map(|dir| PathBuf::from(dir.trim()))
-        .expect("Please set NSS_DIR");
-    assert!(dir.is_dir());
+fn nss_dir() -> Option<PathBuf> {
     // Note that this returns a relative path because UNC
     // paths on windows cause certain tools to explode.
-    dir
+    env::var("NSS_DIR").ok().map(|dir| {
+        let dir = PathBuf::from(dir.trim());
+        assert!(dir.is_dir());
+        dir
+    })
 }
 
 fn get_bash() -> PathBuf {
@@ -253,11 +253,9 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String]) {
         .expect("couldn't write bindings");
 }
 
-fn setup() -> Vec<String> {
+fn build(nss: PathBuf) -> Vec<String> {
     setup_clang();
 
-    println!("cargo:rerun-if-env-changed=NSS_DIR");
-    let nss = nss_dir();
     build_nss(nss.clone());
 
     // $NSS_DIR/../dist/
@@ -288,8 +286,55 @@ fn setup() -> Vec<String> {
     flags
 }
 
+fn pkg_config() -> Vec<String> {
+    let provides = Command::new("pkg-config")
+        .args(&["--modversion", "nss"])
+        .output()
+        .expect("couldn't start NSS build")
+        .stdout;
+    let provides_str = String::from_utf8(provides).expect("non-UTF8 from pkg-config");
+    let mut it = provides_str.split('.');
+    if it.next() != Some("3") {
+        panic!("NSS version 3.62 or higher is needed");
+    }
+    if let Some(minor) = it.next() {
+        let v = minor.parse::<u32>().expect("NSS minor version is a number");
+        if v < 62 {
+            panic!("NSS version 3.62 or higher is needed");
+        }
+    }
+
+    let cfg = Command::new("pkg-config")
+        .args(&["--cflags", "--libs", "nss"])
+        .output()
+        .expect("couldn't start NSS build")
+        .stdout;
+    let cfg_str = String::from_utf8(cfg).expect("non-UTF8 from pkg-config");
+
+    let mut flags: Vec<String> = Vec::new();
+    for f in cfg_str.split(' ') {
+        if f.starts_with("-I") {
+            flags.push(String::from(f));
+            println!("cargo:include={}", &f[2..]);
+        } else if f.starts_with("-L") {
+            println!("cargo:rustc-link-search=native={}", &f[2..]);
+        } else if f.starts_with("-l") {
+            println!("cargo:rustc-link-lib=dylib={}", &f[2..]);
+        } else {
+            println!("Warning: Unknown flag from pkg-config: {}", f);
+        }
+    }
+
+    flags
+}
+
 fn main() {
-    let flags = setup();
+    println!("cargo:rerun-if-env-changed=NSS_DIR");
+    let flags = if let Some(nss) = nss_dir() {
+        build(nss)
+    } else {
+        pkg_config()
+    };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
