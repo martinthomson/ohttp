@@ -135,7 +135,7 @@ impl Clone for SymKey {
 impl std::fmt::Debug for SymKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Ok(b) = self.key_data() {
-            write!(f, "SymKey {}", crate::hex::hex(b))
+            write!(f, "SymKey {}", hex::encode(b))
         } else {
             write!(f, "Opaque SymKey")
         }

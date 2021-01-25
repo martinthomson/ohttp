@@ -2,7 +2,6 @@
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
 
 mod err;
-mod hex;
 mod nss;
 mod rw;
 
@@ -100,17 +99,17 @@ impl KeyConfig {
     ///
     /// struct {
     ///   uint8 key_id;
-    ///   HpkePublicKey public_key;
     ///   HpkeKemId kem_id;
+    ///   HpkePublicKey public_key;
     ///   ECHCipherSuite cipher_suites<4..2^16-4>;
     /// } ECHKeyConfig;
     /// ```
     pub fn encode(&self) -> Res<Vec<u8>> {
         let mut buf = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
+        write_uint(2, self.kem, &mut buf)?;
         let pk_buf = self.pk.serialize()?;
         write_uvec(2, &pk_buf, &mut buf)?;
-        write_uint(2, self.kem, &mut buf)?;
         write_uint(
             2,
             u16::try_from(self.symmetric.len() * 4).unwrap(),
@@ -128,8 +127,8 @@ impl KeyConfig {
     fn parse(encoded_config: &[u8]) -> Res<Self> {
         let mut r = BufReader::new(encoded_config);
         let key_id = KeyId::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
-        let pk_buf = read_uvec(2, &mut r)?;
         let kem = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let pk_buf = read_uvec(2, &mut r)?;
 
         let sym = read_uvec(2, &mut r)?;
         if sym.is_empty() || (sym.len() % 4 != 0) {

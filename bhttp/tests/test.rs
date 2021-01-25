@@ -32,18 +32,6 @@ const REQUEST_KNOWN: &[u8] = &[
     0x6e, 0x2c, 0x20, 0x6d, 0x69, 0x00, 0x00,
 ];
 
-fn hex(buf: &[u8]) -> String {
-    const H: &[char] = &[
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
-    ];
-    let mut r = String::with_capacity(buf.len() * 2);
-    for v in buf {
-        r.push(H[usize::from(*v >> 4)]);
-        r.push(H[usize::from(*v & 0xf)]);
-    }
-    r
-}
-
 #[test]
 fn chunked_read() {
     let _ = Message::read_http(&mut BufReader::new(CHUNKED_HTTP)).unwrap();
@@ -66,7 +54,7 @@ fn chunked_to_known() {
 
     let mut buf = Vec::new();
     m.write_bhttp(Mode::KnownLength, &mut buf).unwrap();
-    println!("result: {}", hex(&buf));
+    println!("result: {}", hex::encode(&buf));
     assert_eq!(&buf[..], CHUNKED_KNOWN);
 }
 
@@ -77,7 +65,7 @@ fn chunked_to_indefinite() {
 
     let mut buf = Vec::new();
     m.write_bhttp(Mode::IndefiniteLength, &mut buf).unwrap();
-    println!("result: {}", hex(&buf));
+    println!("result: {}", hex::encode(&buf));
     assert_eq!(&buf[..], CHUNKED_INDEFINITE);
 }
 
@@ -86,7 +74,7 @@ fn convert_request() {
     let m = Message::read_http(&mut BufReader::new(REQUEST)).unwrap();
     let mut buf = Vec::new();
     m.write_bhttp(Mode::KnownLength, &mut buf).unwrap();
-    println!("result: {}", hex(&buf));
+    println!("result: {}", hex::encode(&buf));
     assert_eq!(&buf[..], REQUEST_KNOWN);
 }
 

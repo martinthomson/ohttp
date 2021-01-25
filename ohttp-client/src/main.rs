@@ -67,20 +67,6 @@ impl Args {
     }
 }
 
-/// This does a bad, bad thing.
-struct IgnoreCertificate {}
-impl rustls::ServerCertVerifier for IgnoreCertificate {
-    fn verify_server_cert(
-        &self,
-        _roots: &rustls::RootCertStore,
-        _presented_certs: &[rustls::Certificate],
-        _dns_name: webpki::DNSNameRef<'_>,
-        _ocsp_response: &[u8],
-    ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
-        Ok(rustls::ServerCertVerified::assertion())
-    }
-}
-
 #[tokio::main]
 async fn main() -> Res<()> {
     let args = Args::from_args();
@@ -115,6 +101,7 @@ async fn main() -> Res<()> {
         .build()?;
     let enc_response = client
         .post(&args.url)
+        .header("content-type", "message/ohttp-req")
         .body(enc_request)
         .send()
         .await?

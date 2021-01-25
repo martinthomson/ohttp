@@ -4,5 +4,6 @@ members = [
   "bhttp-convert",
   "ohttp",
   "ohttp-client",
+  "ohttp-client-cli",
   "ohttp-server",
 ]

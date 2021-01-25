@@ -1,15 +1,11 @@
 [package]
-name = "ohttp-client"
+name = "ohttp-client-cli"
 version = "0.1.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 
 [dependencies]
 hex = "0.4"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
-rustls = { version = "0.19", features = ["dangerous_configuration"]}
-structopt = "0.3"
-tokio = { version = "1", features = ["full"] }
 
 [dependencies.bhttp]
 path= "../bhttp"

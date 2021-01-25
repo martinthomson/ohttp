@@ -12,6 +12,7 @@ server = []
 
 [dependencies]
 lazy_static = "1.4"
+hex = "0.4"
 
 [build-dependencies]
 bindgen = {version = "0.56", default-features = false, features= ["runtime"]}

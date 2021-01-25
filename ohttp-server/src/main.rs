@@ -67,7 +67,9 @@ async fn serve(
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(ohttp, &body[..], mode) {
-        Ok(resp) => Ok(warp::http::Response::builder().body(resp)),
+        Ok(resp) => Ok(warp::http::Response::builder()
+            .header("Content-Type", "message/ohttp-res")
+            .body(resp)),
         Err(e) => {
             if let Ok(oe) = e.downcast::<::ohttp::Error>() {
                 Ok(warp::http::Response::builder()
