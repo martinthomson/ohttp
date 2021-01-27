@@ -379,13 +379,13 @@ mod test {
         let client = ClientRequest::new(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
         trace!("Request: {}", hex::encode(REQUEST));
-        trace!("Encapsulated Request: {}", hex::encode(&encoded_config));
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
 
         let (request, server_response) = server.decapsulate(&enc_request).unwrap();
         assert_eq!(&request[..], REQUEST);
 
         let enc_response = server_response.encapsulate(RESPONSE).unwrap();
-        trace!("Encapsulated Response: {}", hex::encode(&encoded_config));
+        trace!("Encapsulated Response: {}", hex::encode(&enc_response));
 
         let response = client_response.decapsulate(&enc_response).unwrap();
         assert_eq!(&response[..], RESPONSE);
