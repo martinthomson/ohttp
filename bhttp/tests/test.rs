@@ -99,3 +99,35 @@ fn truncated_to_http() {
     m.write_http(&mut buf).unwrap();
     assert_eq!(&buf[..], REQUEST);
 }
+
+#[test]
+fn tiny_request() {
+    const REQUEST: &[u8] = &[
+        0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78, 0x61,
+        0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x01, 0x2f,
+    ];
+    let m = Message::read_bhttp(&mut BufReader::new(REQUEST)).unwrap();
+    assert_eq!(m.control().method().unwrap(), b"GET");
+    assert_eq!(m.control().scheme().unwrap(), b"https");
+    assert_eq!(m.control().authority().unwrap(), b"example.com");
+    assert_eq!(m.control().path().unwrap(), b"/");
+    assert!(m.control().status().is_none());
+    assert!(m.header().is_empty());
+    assert!(m.content().is_empty());
+    assert!(m.trailer().is_empty());
+}
+
+#[test]
+fn tiny_response() {
+    const RESPONSE: &[u8] = &[0x01, 0x40, 0xc8];
+    let m = Message::read_bhttp(&mut BufReader::new(RESPONSE)).unwrap();
+    assert!(m.informational().is_empty());
+    assert_eq!(m.control().status().unwrap(), 200);
+    assert!(m.control().method().is_none());
+    assert!(m.control().scheme().is_none());
+    assert!(m.control().authority().is_none());
+    assert!(m.control().path().is_none());
+    assert!(m.header().is_empty());
+    assert!(m.content().is_empty());
+    assert!(m.trailer().is_empty());
+}

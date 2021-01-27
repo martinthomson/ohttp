@@ -1,6 +1,7 @@
 use super::err::{sec::SEC_ERROR_INVALID_ARGS, Error, Res};
 use super::p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey};
 use super::secstatus_to_res;
+use log::{log_enabled, trace};
 use std::convert::TryFrom;
 use std::ops::Deref;
 use std::os::raw::{c_uint, c_void};
@@ -129,19 +130,58 @@ impl Hpke {
         params.push(u8::try_from(oid.oid.len).unwrap());
         params.extend_from_slice(oid_slc);
 
-        let mut pk: *mut sys::SECKEYPublicKey = null_mut();
-        let sk = unsafe {
-            sys::PK11_GenerateKeyPair(
-                *slot,
-                sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                &mut Item::wrap(&params) as *mut _ as *mut c_void,
-                &mut pk,
-                sys::PRBool::from(false),
-                sys::PRBool::from(true),
-                null_mut(),
-            )
+        let mut public_ptr: *mut sys::SECKEYPublicKey = null_mut();
+
+        // If we have tracing on, make sure that we can read the key data.
+        // This makes the key insensitive, which isn't ideal.
+        let mut attempt_trace = log_enabled!(log::Level::Trace);
+        let insensitive_secret_ptr = if attempt_trace {
+            unsafe {
+                sys::PK11_GenerateKeyPairWithOpFlags(
+                    *slot,
+                    sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
+                    &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                    &mut public_ptr,
+                    sys::PK11_ATTR_SESSION | sys::PK11_ATTR_INSENSITIVE | sys::PK11_ATTR_PUBLIC,
+                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                    null_mut(),
+                )
+            }
+        } else {
+            null_mut()
         };
-        Ok((PrivateKey::from_ptr(sk)?, PublicKey::from_ptr(pk)?))
+        assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
+        let secret_ptr = if insensitive_secret_ptr.is_null() {
+            attempt_trace = false;
+            unsafe {
+                sys::PK11_GenerateKeyPairWithOpFlags(
+                    *slot,
+                    sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
+                    &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                    &mut public_ptr,
+                    sys::PK11_ATTR_SESSION | sys::PK11_ATTR_SENSITIVE | sys::PK11_ATTR_PRIVATE,
+                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                    null_mut(),
+                )
+            }
+        } else {
+            insensitive_secret_ptr
+        };
+        assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
+        let sk = PrivateKey::from_ptr(secret_ptr)?;
+        let pk = PublicKey::from_ptr(public_ptr)?;
+        if attempt_trace {
+            // This code is executed sometimes when logging is not enabled.
+            // Hence the extra guard.
+            trace!(
+                "Generated key pair: sk={} pk={}",
+                hex::encode(sk.key_data()?),
+                hex::encode(pk.key_data()?),
+            );
+        }
+        Ok((sk, pk))
     }
 
     #[allow(clippy::similar_names)]
@@ -228,8 +268,8 @@ impl Deref for Hpke {
 
 #[cfg(test)]
 mod test {
-    use super::super::init;
     use super::{AeadId, Hpke, HpkeConfig};
+    use crate::init;
 
     #[must_use]
     fn new_context() -> Hpke {

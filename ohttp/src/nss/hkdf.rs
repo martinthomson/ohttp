@@ -6,6 +6,7 @@ use super::p11::sys::{
     CK_ULONG,
 };
 use super::p11::{ParamItem, SymKey};
+use log::trace;
 use std::convert::TryFrom;
 use std::os::raw::c_int;
 use std::ptr::null_mut;
@@ -96,7 +97,14 @@ impl Hkdf {
             )
         };
 
-        SymKey::from_ptr(ptr)
+        let prk = SymKey::from_ptr(ptr)?;
+        trace!(
+            "HKDF extract: salt={} ikm={} prk={}",
+            hex::encode(salt),
+            hex::encode(ikm.key_data()?),
+            hex::encode(prk.key_data()?),
+        );
+        Ok(prk)
     }
 
     fn expand_params(&self, info: &[u8]) -> ParamItem<CK_HKDF_PARAMS> {
@@ -124,7 +132,14 @@ impl Hkdf {
                 c_int::try_from(key_mech.len()).unwrap(),
             )
         };
-        SymKey::from_ptr(ptr)
+        let okm = SymKey::from_ptr(ptr)?;
+        trace!(
+            "HKDF expand_key: prk={} info={} okm={}",
+            hex::encode(prk.key_data()?),
+            hex::encode(info),
+            hex::encode(okm.key_data()?),
+        );
+        Ok(okm)
     }
 
     pub fn expand_data(&self, prk: &SymKey, info: &[u8], len: usize) -> Res<Vec<u8>> {
@@ -139,15 +154,22 @@ impl Hkdf {
             )
         };
         let k = SymKey::from_ptr(ptr)?;
-        Ok(Vec::from(k.key_data()?))
+        let r = Vec::from(k.key_data()?);
+        trace!(
+            "HKDF expand_data: prk={} info={} okm={}",
+            hex::encode(prk.key_data()?),
+            hex::encode(info),
+            hex::encode(&r),
+        );
+        Ok(r)
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::super::hpke::KdfId;
-    use super::super::init;
     use super::Hkdf;
+    use crate::init;
 
     fn sha256_example(
         ikm: &[u8],

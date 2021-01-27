@@ -6,6 +6,7 @@ use super::p11::sys::{
     CK_MECHANISM_TYPE,
 };
 use super::p11::{Item, SymKey};
+use log::trace;
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::os::raw::c_int;
@@ -91,6 +92,12 @@ impl Aead {
         key: &SymKey,
         nonce_base: [u8; NONCE_LEN],
     ) -> Res<Self> {
+        trace!(
+            "New AEAD: key={} nonce_base={}",
+            hex::encode(key.key_data()?),
+            hex::encode(&nonce_base)
+        );
+
         let ptr = unsafe {
             PK11_CreateContextBySymKey(
                 Self::mech(algorithm),

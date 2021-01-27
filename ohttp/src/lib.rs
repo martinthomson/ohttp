@@ -7,7 +7,6 @@ mod rw;
 
 pub use err::Error;
 pub use nss::hpke::{AeadId, KdfId, KemId};
-pub use nss::init;
 
 use err::Res;
 use nss::aead::{Aead, Mode, NONCE_LEN};
@@ -27,6 +26,11 @@ const INFO_NONCE: &[u8] = b"nonce";
 
 /// The type of a key identifier.
 pub type KeyId = u8;
+
+pub fn init() {
+    nss::init();
+    let _ = env_logger::try_init();
+}
 
 /// A tuple of KDF and AEAD identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -108,7 +112,7 @@ impl KeyConfig {
         let mut buf = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
         write_uint(2, self.kem, &mut buf)?;
-        let pk_buf = self.pk.serialize()?;
+        let pk_buf = self.pk.key_data()?;
         write_uvec(2, &pk_buf, &mut buf)?;
         write_uint(
             2,
@@ -348,6 +352,7 @@ impl ClientResponse {
 mod test {
     use crate::nss::hpke::{AeadId, KdfId, KemId};
     use crate::{ClientRequest, KeyConfig, KeyId, Server, SymmetricSuite};
+    use log::trace;
 
     const KEY_ID: KeyId = 1;
     const KEM: KemId::Type = KemId::HpkeDhKemX25519Sha256;
@@ -356,32 +361,40 @@ mod test {
         SymmetricSuite::new(KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadChaCha20Poly1305),
     ];
 
-    const REQUEST: &[u8] = b"why is the sky blue?";
-    const RESPONSE: &[u8] = b"because air is blue";
+    const REQUEST: &[u8] = &[
+        0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78, 0x61,
+        0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x01, 0x2f,
+    ];
+    const RESPONSE: &[u8] = &[0x01, 0x40, 0xc8];
 
     #[test]
     fn request_response() {
-        crate::nss::init();
+        crate::init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
 
         let client = ClientRequest::new(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("Request: {}", hex::encode(REQUEST));
+        trace!("Encapsulated Request: {}", hex::encode(&encoded_config));
 
         let (request, server_response) = server.decapsulate(&enc_request).unwrap();
         assert_eq!(&request[..], REQUEST);
 
         let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        trace!("Encapsulated Response: {}", hex::encode(&encoded_config));
 
         let response = client_response.decapsulate(&enc_response).unwrap();
         assert_eq!(&response[..], RESPONSE);
+        trace!("Response: {}", hex::encode(RESPONSE));
     }
 
     #[test]
     fn two_requests() {
-        crate::nss::init();
+        crate::init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
         let mut server = Server::new(server_config).unwrap();

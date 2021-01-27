@@ -12,6 +12,7 @@ use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::{c_int, c_uint};
 use std::pin::Pin;
+use std::ptr::null_mut;
 
 #[allow(
     dead_code,
@@ -25,10 +26,11 @@ pub mod sys {
 }
 
 use sys::{
-    PK11SlotInfo, PK11SymKey, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
-    PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData, PK11_ReferenceSymKey, PRBool,
-    SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey, SECKEYPublicKey,
-    SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey,
+    PK11ObjectType, PK11SlotInfo, PK11SymKey, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
+    PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData, PK11_ReadRawAttribute,
+    PK11_ReferenceSymKey, PRBool, SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey,
+    SECKEYPublicKey, SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey, CKA_VALUE,
+    CK_ATTRIBUTE_TYPE,
 };
 
 macro_rules! scoped_ptr {
@@ -70,13 +72,40 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
+
+impl PrivateKey {
+    pub fn key_data(&self) -> Res<Vec<u8>> {
+        let mut key_item = SECItem {
+            type_: SECItemType::siBuffer,
+            data: null_mut(),
+            len: 0,
+        };
+        secstatus_to_res(unsafe {
+            PK11_ReadRawAttribute(
+                PK11ObjectType::PK11_TypePrivKey,
+                **self as *mut _,
+                CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
+                &mut key_item,
+            )
+        })?;
+        let slc = unsafe {
+            std::slice::from_raw_parts(key_item.data, usize::try_from(key_item.len).unwrap())
+        };
+        let key = Vec::from(slc);
+        // The data that `key_item` refers to needs to be freed, but we can't
+        // use the scoped `Item` implementation.  This is OK as long as nothing
+        // panics between `PK11_ReadRawAttribute` succeeding and here.
+        unsafe { SECITEM_FreeItem(&mut key_item, PRBool::from(false)) };
+        Ok(key)
+    }
+}
 unsafe impl Send for PrivateKey {}
 
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
 impl PublicKey {
     /// Get the HPKE serialization of the public key.
-    pub fn serialize(&self) -> Res<Vec<u8>> {
+    pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut buf = vec![0; 100];
         let mut len: c_uint = 0;
         secstatus_to_res(unsafe {
@@ -216,8 +245,8 @@ impl Item {
 
 #[cfg(test)]
 mod test {
-    use super::super::init;
     use super::random;
+    use crate::init;
 
     #[test]
     fn randomness() {
