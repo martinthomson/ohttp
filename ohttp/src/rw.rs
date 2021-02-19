@@ -13,12 +13,6 @@ pub fn write_uint(n: usize, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()
     Ok(())
 }
 
-pub fn write_uvec(n: usize, v: &[u8], w: &mut impl io::Write) -> Res<()> {
-    write_uint(n, u64::try_from(v.len()).unwrap(), w)?;
-    w.write_all(v)?;
-    Ok(())
-}
-
 pub fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<u64> {
     let mut buf = [0; 7];
     let count = r.read(&mut buf[..n])?;

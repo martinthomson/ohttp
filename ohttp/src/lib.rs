@@ -13,7 +13,7 @@ use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
 use nss::hpke::{Hpke, HpkeConfig};
 use nss::{random, PrivateKey, PublicKey};
-use rw::{read_uint, read_uvec, write_uint, write_uvec};
+use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::io::{BufReader, Read};
@@ -91,7 +91,7 @@ impl KeyConfig {
     /// Encode into a wire format.  This shares a format with the core of ECH:
     ///
     /// ```tls-format
-    /// opaque HpkePublicKey<1..2^16-1>;
+    /// opaque HpkePublicKey[Npk];
     /// uint16 HpkeKemId;  // Defined in I-D.irtf-cfrg-hpke
     /// uint16 HpkeKdfId;  // Defined in I-D.irtf-cfrg-hpke
     /// uint16 HpkeAeadId; // Defined in I-D.irtf-cfrg-hpke
@@ -113,7 +113,7 @@ impl KeyConfig {
         write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
         write_uint(2, self.kem, &mut buf)?;
         let pk_buf = self.pk.key_data()?;
-        write_uvec(2, &pk_buf, &mut buf)?;
+        buf.extend_from_slice(&pk_buf);
         write_uint(
             2,
             u16::try_from(self.symmetric.len() * 4).unwrap(),
@@ -132,7 +132,14 @@ impl KeyConfig {
         let mut r = BufReader::new(encoded_config);
         let key_id = KeyId::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
         let kem = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
-        let pk_buf = read_uvec(2, &mut r)?;
+
+        // Note that the KDF and AEAD doesn't matter here.
+        let kem_config = HpkeConfig::new(kem, KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadAes128Gcm);
+        if !kem_config.supported() {
+            return Err(Error::Unsupported);
+        }
+        let mut pk_buf = vec![0; kem_config.n_pk()];
+        r.read_exact(&mut pk_buf)?;
 
         let sym = read_uvec(2, &mut r)?;
         if sym.is_empty() || (sym.len() % 4 != 0) {
@@ -154,11 +161,7 @@ impl KeyConfig {
         }
 
         Self::strip_unsupported(&mut symmetric, kem);
-        let hpke = Hpke::new(HpkeConfig::new(
-            kem,
-            symmetric[0].kdf(),  // KDF doesn't matter here
-            symmetric[0].aead(), // ditto
-        ))?;
+        let hpke = Hpke::new(kem_config)?;
         let pk = hpke.decode_public_key(&pk_buf)?;
 
         Ok(Self {
@@ -212,6 +215,7 @@ impl ClientRequest {
         // AAD is keyID + kdfID + aeadID:
         let mut enc_request = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut enc_request)?;
+        write_uint(2, self.hpke.kem(), &mut enc_request)?;
         write_uint(2, self.hpke.kdf(), &mut enc_request)?;
         write_uint(2, self.hpke.aead(), &mut enc_request)?;
 
@@ -245,8 +249,10 @@ impl Server {
         &self.config
     }
 
+    #[allow(clippy::similar_names)] // for kem_id and key_id
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
-        const AAD_LEN: usize = size_of::<KeyId>() + 4;
+        // Can't size_of() for KemId::Type and friends; the AAD covers each of these.
+        const AAD_LEN: usize = size_of::<KeyId>() + 6;
         if enc_request.len() < AAD_LEN {
             return Err(Error::Truncated);
         }
@@ -255,6 +261,10 @@ impl Server {
         let key_id = u8::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
         if key_id != self.config.key_id {
             return Err(Error::KeyId);
+        }
+        let kem_id = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        if kem_id != self.config.kem {
+            return Err(Error::InvalidKem);
         }
         let kdf_id = KdfId::Type::try_from(read_uint(2, &mut r)?).unwrap();
         let aead_id = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();

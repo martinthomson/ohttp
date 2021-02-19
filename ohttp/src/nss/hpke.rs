@@ -48,6 +48,13 @@ impl HpkeConfig {
         }
     }
 
+    pub fn n_pk(&self) -> usize {
+        match self.kem {
+            KemId::HpkeDhKemX25519Sha256 => 32,
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn n_k(&self) -> usize {
         match self.aead {
             AeadId::HpkeAeadAes128Gcm => 16,

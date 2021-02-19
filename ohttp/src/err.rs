@@ -4,6 +4,8 @@ pub enum Error {
     Crypto(crate::nss::Error),
     /// An error was found in the format.
     Format,
+    /// The wrong KEM was specified.
+    InvalidKem,
     /// An IO error.
     Io(std::io::Error),
     /// The key ID was invalid.
