@@ -206,9 +206,8 @@ impl FieldSection {
                 if n.is_empty() {
                     if terminator {
                         return Ok(fields);
-                    } else {
-                        return Err(Error::Truncated);
                     }
+                    return Err(Error::Truncated);
                 }
                 let mut v = read_vec(r)?.ok_or(Error::Truncated)?;
                 if n == COOKIE {
