@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 
 use bindgen::Builder;
 use serde_derive::Deserialize;
@@ -74,7 +73,7 @@ fn setup_clang() {
         eprintln!("warning: Building without a gecko setup is not likely to work.");
         eprintln!("         A working libclang is needed to build neqo.");
         eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-        eprintln!("");
+        eprintln!();
         eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
         eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
         eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");

@@ -285,7 +285,7 @@ pub enum ControlData {
 impl ControlData {
     #[must_use]
     pub fn is_request(&self) -> bool {
-        matches!(self, Self::Request{ .. })
+        matches!(self, Self::Request { .. })
     }
 
     #[must_use]
@@ -580,7 +580,7 @@ impl Message {
         loop {
             let mut line = read_line(r)?;
             if let Some(i) = index_of(SEMICOLON, &line) {
-                let _ = line.split_off(i);
+                std::mem::drop(line.split_off(i));
             }
             let count_str = String::from_utf8(line)?;
             let count = usize::from_str_radix(&count_str, 16)?;
