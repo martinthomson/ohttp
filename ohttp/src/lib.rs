@@ -212,7 +212,7 @@ impl ClientRequest {
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
-        // AAD is keyID + kdfID + aeadID:
+        // AAD is this header
         let mut enc_request = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut enc_request)?;
         write_uint(2, self.hpke.kem(), &mut enc_request)?;
