@@ -11,7 +11,7 @@ pub use nss::hpke::{AeadId, KdfId, KemId};
 use err::Res;
 use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
-use nss::hpke::{Hpke, HpkeConfig};
+use nss::hpke::{generate_key_pair, Hpke, HpkeConfig};
 use nss::{random, PrivateKey, PublicKey};
 use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
@@ -78,7 +78,7 @@ impl KeyConfig {
     pub fn new(key_id: u8, kem: KemId::Type, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
         Self::strip_unsupported(&mut symmetric, kem);
         assert!(!symmetric.is_empty());
-        let (sk, pk) = Hpke::generate_key_pair(kem)?;
+        let (sk, pk) = generate_key_pair(kem)?;
         Ok(Self {
             key_id,
             kem,
@@ -202,7 +202,7 @@ impl ClientRequest {
 
         // TODO(mt) choose the best config, not just the first.
         let mut hpke = config.create_hpke(config.symmetric[0])?;
-        let (mut sk_s, pk_s) = Hpke::generate_key_pair(config.kem)?;
+        let (mut sk_s, pk_s) = generate_key_pair(config.kem)?;
         hpke.setup_s(&pk_s, &mut sk_s, &mut config.pk, INFO_REQUEST)?;
 
         Ok(Self {

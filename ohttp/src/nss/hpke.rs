@@ -122,64 +122,6 @@ impl Hpke {
         PublicKey::from_ptr(ptr)
     }
 
-    /// Generate a key pair for the KEM.
-    pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
-        assert_eq!(kem, KemId::HpkeDhKemX25519Sha256);
-        let slot = Slot::internal()?;
-
-        let oid_data = unsafe { sys::SECOID_FindOIDByTag(sys::SECOidTag::SEC_OID_CURVE25519) };
-        let oid = unsafe { oid_data.as_ref() }.ok_or_else(Error::internal)?;
-        let oid_slc = unsafe {
-            std::slice::from_raw_parts(oid.oid.data, usize::try_from(oid.oid.len).unwrap())
-        };
-        let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
-        params.push(u8::try_from(sys::SEC_ASN1_OBJECT_ID).unwrap());
-        params.push(u8::try_from(oid.oid.len).unwrap());
-        params.extend_from_slice(oid_slc);
-
-        let mut public_ptr: *mut sys::SECKEYPublicKey = null_mut();
-
-        // Try to make an insensitive key so that we can read the key data for tracing.
-        let insensitive_secret_ptr = if log_enabled!(log::Level::Trace) {
-            unsafe {
-                sys::PK11_GenerateKeyPairWithOpFlags(
-                    *slot,
-                    sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                    (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
-                    &mut public_ptr,
-                    sys::PK11_ATTR_SESSION | sys::PK11_ATTR_INSENSITIVE | sys::PK11_ATTR_PUBLIC,
-                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
-                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
-                    null_mut(),
-                )
-            }
-        } else {
-            null_mut()
-        };
-        assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
-        let secret_ptr = if insensitive_secret_ptr.is_null() {
-            unsafe {
-                sys::PK11_GenerateKeyPairWithOpFlags(
-                    *slot,
-                    sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                    (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
-                    &mut public_ptr,
-                    sys::PK11_ATTR_SESSION | sys::PK11_ATTR_SENSITIVE | sys::PK11_ATTR_PRIVATE,
-                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
-                    sys::CK_FLAGS::from(sys::CKF_DERIVE),
-                    null_mut(),
-                )
-            }
-        } else {
-            insensitive_secret_ptr
-        };
-        assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
-        let sk = PrivateKey::from_ptr(secret_ptr)?;
-        let pk = PublicKey::from_ptr(public_ptr)?;
-        trace!("Generated key pair: sk={:?} pk={:?}", sk, pk);
-        Ok((sk, pk))
-    }
-
     #[allow(clippy::similar_names)]
     pub fn setup_s(
         &mut self,
@@ -262,9 +204,66 @@ impl Deref for Hpke {
     }
 }
 
+/// Generate a key pair for the identified KEM.
+pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
+    assert_eq!(kem, KemId::HpkeDhKemX25519Sha256);
+    let slot = Slot::internal()?;
+
+    let oid_data = unsafe { sys::SECOID_FindOIDByTag(sys::SECOidTag::SEC_OID_CURVE25519) };
+    let oid = unsafe { oid_data.as_ref() }.ok_or_else(Error::internal)?;
+    let oid_slc =
+        unsafe { std::slice::from_raw_parts(oid.oid.data, usize::try_from(oid.oid.len).unwrap()) };
+    let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
+    params.push(u8::try_from(sys::SEC_ASN1_OBJECT_ID).unwrap());
+    params.push(u8::try_from(oid.oid.len).unwrap());
+    params.extend_from_slice(oid_slc);
+
+    let mut public_ptr: *mut sys::SECKEYPublicKey = null_mut();
+
+    // Try to make an insensitive key so that we can read the key data for tracing.
+    let insensitive_secret_ptr = if log_enabled!(log::Level::Trace) {
+        unsafe {
+            sys::PK11_GenerateKeyPairWithOpFlags(
+                *slot,
+                sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
+                (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
+                &mut public_ptr,
+                sys::PK11_ATTR_SESSION | sys::PK11_ATTR_INSENSITIVE | sys::PK11_ATTR_PUBLIC,
+                sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                null_mut(),
+            )
+        }
+    } else {
+        null_mut()
+    };
+    assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
+    let secret_ptr = if insensitive_secret_ptr.is_null() {
+        unsafe {
+            sys::PK11_GenerateKeyPairWithOpFlags(
+                *slot,
+                sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
+                (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
+                &mut public_ptr,
+                sys::PK11_ATTR_SESSION | sys::PK11_ATTR_SENSITIVE | sys::PK11_ATTR_PRIVATE,
+                sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                sys::CK_FLAGS::from(sys::CKF_DERIVE),
+                null_mut(),
+            )
+        }
+    } else {
+        insensitive_secret_ptr
+    };
+    assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
+    let sk = PrivateKey::from_ptr(secret_ptr)?;
+    let pk = PublicKey::from_ptr(public_ptr)?;
+    trace!("Generated key pair: sk={:?} pk={:?}", sk, pk);
+    Ok((sk, pk))
+}
+
 #[cfg(test)]
 mod test {
-    use super::{AeadId, Hpke, HpkeConfig};
+    use super::{generate_key_pair, AeadId, Hpke, HpkeConfig};
     use crate::init;
 
     #[must_use]
@@ -293,8 +292,8 @@ mod test {
         assert!(cfg.supported());
         let mut hpke_s = Hpke::new(cfg).unwrap();
         let mut hpke_r = Hpke::new(cfg).unwrap();
-        let (mut sk_s, pk_s) = Hpke::generate_key_pair(cfg.kem()).unwrap();
-        let (mut sk_r, mut pk_r) = Hpke::generate_key_pair(cfg.kem()).unwrap();
+        let (mut sk_s, pk_s) = generate_key_pair(cfg.kem()).unwrap();
+        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
         hpke_s.setup_s(&pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
