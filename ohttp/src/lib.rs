@@ -11,7 +11,7 @@ pub use nss::hpke::{AeadId, KdfId, KemId};
 use err::Res;
 use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
-use nss::hpke::{generate_key_pair, Hpke, HpkeConfig};
+use nss::hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS};
 use nss::{random, PrivateKey, PublicKey};
 use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
@@ -163,8 +163,7 @@ impl KeyConfig {
         }
 
         Self::strip_unsupported(&mut symmetric, kem);
-        let hpke = Hpke::new(kem_config)?;
-        let pk = hpke.decode_public_key(&pk_buf)?;
+        let pk = HpkeR::decode_public_key(kem_config.kem(), &pk_buf)?;
 
         Ok(Self {
             key_id,
@@ -175,10 +174,10 @@ impl KeyConfig {
         })
     }
 
-    fn create_hpke(&mut self, sym: SymmetricSuite) -> Res<Hpke> {
+    fn select(&mut self, sym: SymmetricSuite) -> Res<HpkeConfig> {
         if self.symmetric.contains(&sym) {
             let config = HpkeConfig::new(self.kem, sym.kdf(), sym.aead());
-            Ok(Hpke::new(config)?)
+            Ok(config)
         } else {
             Err(Error::Unsupported)
         }
@@ -190,7 +189,7 @@ impl KeyConfig {
 #[cfg(feature = "client")]
 pub struct ClientRequest {
     key_id: KeyId,
-    hpke: Hpke,
+    hpke: HpkeS,
 }
 
 impl ClientRequest {
@@ -200,10 +199,15 @@ impl ClientRequest {
     pub fn new(encoded_config: &[u8]) -> Res<Self> {
         let mut config = KeyConfig::parse(encoded_config)?;
 
-        // TODO(mt) choose the best config, not just the first.
-        let mut hpke = config.create_hpke(config.symmetric[0])?;
         let (mut sk_s, pk_s) = generate_key_pair(config.kem)?;
-        hpke.setup_s(&pk_s, &mut sk_s, &mut config.pk, INFO_REQUEST)?;
+        let hpke = HpkeS::new(
+            // TODO(mt) choose the best config, not just the first.
+            config.select(config.symmetric[0])?,
+            &pk_s,
+            &mut sk_s,
+            &mut config.pk,
+            INFO_REQUEST,
+        )?;
 
         Ok(Self {
             key_id: config.key_id,
@@ -276,10 +280,11 @@ impl Server {
         let aead_id = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();
         let sym = SymmetricSuite::new(kdf_id, aead_id);
 
-        let mut hpke = self.config.create_hpke(sym)?;
-        let mut enc = vec![0; hpke.n_enc()];
+        let cfg = self.config.select(sym)?;
+        let mut enc = vec![0; cfg.n_enc()];
         r.read_exact(&mut enc)?;
-        hpke.setup_r(
+        let mut hpke = HpkeR::new(
+            cfg,
             &self.config.pk,
             self.config.sk.as_mut().unwrap(),
             &enc,
@@ -298,19 +303,25 @@ fn entropy(config: HpkeConfig) -> usize {
     max(config.n_n(), config.n_k())
 }
 
-fn make_aead(mode: Mode, hpke: &Hpke, enc: Vec<u8>, response_nonce: &[u8]) -> Res<Aead> {
-    let secret = hpke.export(LABEL_RESPONSE, entropy(hpke.config()))?;
+fn make_aead(
+    mode: Mode,
+    cfg: HpkeConfig,
+    exp: &impl Exporter,
+    enc: Vec<u8>,
+    response_nonce: &[u8],
+) -> Res<Aead> {
+    let secret = exp.export(LABEL_RESPONSE, entropy(cfg))?;
     let mut salt = enc;
     salt.extend_from_slice(response_nonce);
 
-    let hkdf = Hkdf::new(hpke.config().kdf());
+    let hkdf = Hkdf::new(cfg.kdf());
     let prk = hkdf.extract(&salt, &secret)?;
 
-    let key = hkdf.expand_key(&prk, INFO_KEY, KeyMechanism::Aead(hpke.config().aead()))?;
-    let iv = hkdf.expand_data(&prk, INFO_NONCE, hpke.config().n_n())?;
+    let key = hkdf.expand_key(&prk, INFO_KEY, KeyMechanism::Aead(cfg.aead()))?;
+    let iv = hkdf.expand_data(&prk, INFO_NONCE, cfg.n_n())?;
     let nonce_base = <[u8; NONCE_LEN]>::try_from(iv).unwrap();
 
-    Ok(Aead::new(mode, hpke.config().aead(), &key, nonce_base)?)
+    Ok(Aead::new(mode, cfg.aead(), &key, nonce_base)?)
 }
 
 /// An object for encapsulating responses.
@@ -322,9 +333,9 @@ pub struct ServerResponse {
 }
 
 impl ServerResponse {
-    fn new(hpke: &Hpke, enc: Vec<u8>) -> Res<Self> {
+    fn new(hpke: &HpkeR, enc: Vec<u8>) -> Res<Self> {
         let response_nonce = random(entropy(hpke.config()));
-        let aead = make_aead(Mode::Encrypt, hpke, enc, &response_nonce)?;
+        let aead = make_aead(Mode::Encrypt, hpke.config(), hpke, enc, &response_nonce)?;
         Ok(Self {
             response_nonce,
             aead,
@@ -344,7 +355,7 @@ impl ServerResponse {
 /// The only way to obtain one of these is through `ClientRequest::encapsulate()`.
 #[cfg(feature = "client")]
 pub struct ClientResponse {
-    hpke: Hpke,
+    hpke: HpkeS,
     enc: Vec<u8>,
 }
 
@@ -352,14 +363,20 @@ impl ClientResponse {
     /// Private method for constructing one of these.
     /// Doesn't do anything because we don't have the nonce yet, so
     /// the work that can be done is limited.
-    fn new(hpke: Hpke, enc: Vec<u8>) -> Self {
+    fn new(hpke: HpkeS, enc: Vec<u8>) -> Self {
         Self { hpke, enc }
     }
 
     /// Consume this object by decapsulating a response.
     pub fn decapsulate(self, enc_response: &[u8]) -> Res<Vec<u8>> {
         let (response_nonce, ct) = enc_response.split_at(entropy(self.hpke.config()));
-        let aead = make_aead(Mode::Decrypt, &self.hpke, self.enc, response_nonce)?;
+        let aead = make_aead(
+            Mode::Decrypt,
+            self.hpke.config(),
+            &self.hpke,
+            self.enc,
+            response_nonce,
+        )?;
         Ok(aead.open(&[], 0, ct)?) // 0 is the sequence number
     }
 }

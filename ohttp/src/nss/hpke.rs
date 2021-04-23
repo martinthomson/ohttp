@@ -11,13 +11,13 @@ pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
 
 /// Configuration for `Hpke`.
 #[derive(Clone, Copy)]
-pub struct HpkeConfig {
+pub struct Config {
     kem: KemId::Type,
     kdf: KdfId::Type,
     aead: AeadId::Type,
 }
 
-impl HpkeConfig {
+impl Config {
     pub fn new(kem: KemId::Type, kdf: KdfId::Type, aead: AeadId::Type) -> Self {
         Self { kem, kdf, aead }
     }
@@ -71,7 +71,7 @@ impl HpkeConfig {
     }
 }
 
-impl Default for HpkeConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             kem: KemId::HpkeDhKemX25519Sha256,
@@ -81,62 +81,68 @@ impl Default for HpkeConfig {
     }
 }
 
+pub trait Exporter {
+    fn export(&self, info: &[u8], len: usize) -> Res<SymKey>;
+}
+
 unsafe fn destroy_hpke_context(cx: *mut sys::HpkeContext) {
     sys::PK11_HPKE_DestroyContext(cx, sys::PRBool::from(true));
 }
 
 scoped_ptr!(HpkeContext, sys::HpkeContext, destroy_hpke_context);
 
-pub struct Hpke {
-    context: HpkeContext,
-    config: HpkeConfig,
-}
-
-impl Hpke {
-    /// Create a new context that uses the KEM mode.
-    /// This object is useless until `setup_s` or `setup_r` is called.
-    pub fn new(config: HpkeConfig) -> Res<Self> {
+impl HpkeContext {
+    fn new(config: Config) -> Res<Self> {
         let ptr = unsafe {
             sys::PK11_HPKE_NewContext(config.kem, config.kdf, config.aead, null_mut(), null())
         };
-        Ok(Self {
-            context: HpkeContext::from_ptr(ptr)?,
-            config,
-        })
+        Self::from_ptr(ptr)
     }
+}
 
-    pub fn config(&self) -> HpkeConfig {
-        self.config
-    }
-
-    pub fn decode_public_key(&self, k: &[u8]) -> Res<PublicKey> {
-        let mut ptr: *mut sys::SECKEYPublicKey = null_mut();
+impl Exporter for HpkeContext {
+    fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
+        let mut out: *mut sys::PK11SymKey = null_mut();
         secstatus_to_res(unsafe {
-            sys::PK11_HPKE_Deserialize(
-                *self.context,
-                k.as_ptr(),
-                c_uint::try_from(k.len()).unwrap(),
-                &mut ptr,
+            sys::PK11_HPKE_ExportSecret(
+                self.ptr,
+                &Item::wrap(info),
+                c_uint::try_from(len).unwrap(),
+                &mut out,
             )
         })?;
-        PublicKey::from_ptr(ptr)
+        SymKey::from_ptr(out)
     }
+}
 
+#[allow(clippy::module_name_repetitions)]
+pub struct HpkeS {
+    context: HpkeContext,
+    config: Config,
+}
+
+impl HpkeS {
+    /// Create a new context that uses the KEM mode for sending.
     #[allow(clippy::similar_names)]
-    pub fn setup_s(
-        &mut self,
+    pub fn new(
+        config: Config,
         pk_e: &PublicKey,
         sk_e: &mut PrivateKey,
         pk_r: &mut PublicKey,
         info: &[u8],
-    ) -> Res<()> {
+    ) -> Res<Self> {
+        let context = HpkeContext::new(config)?;
         secstatus_to_res(unsafe {
-            sys::PK11_HPKE_SetupS(*self.context, **pk_e, **sk_e, **pk_r, &Item::wrap(info))
-        })
+            sys::PK11_HPKE_SetupS(*context, **pk_e, **sk_e, **pk_r, &Item::wrap(info))
+        })?;
+        Ok(Self { context, config })
+    }
+
+    pub fn config(&self) -> Config {
+        self.config
     }
 
     /// Get the encapsulated KEM secret.
-    /// Only works after calling `setup_s`, returns an error if this is a receiver.
     pub fn enc(&self) -> Res<Vec<u8>> {
         let v = unsafe { sys::PK11_HPKE_GetEncapPubKey(*self.context) };
         let r = unsafe { v.as_ref() }.ok_or_else(|| Error::from(SEC_ERROR_INVALID_ARGS))?;
@@ -144,25 +150,6 @@ impl Hpke {
         let len = usize::try_from(r.len).unwrap();
         let slc = unsafe { std::slice::from_raw_parts(r.data, len) };
         Ok(Vec::from(slc))
-    }
-
-    #[allow(clippy::similar_names)]
-    pub fn setup_r(
-        &mut self,
-        pk_r: &PublicKey,
-        sk_r: &mut PrivateKey,
-        enc: &[u8],
-        info: &[u8],
-    ) -> Res<()> {
-        secstatus_to_res(unsafe {
-            sys::PK11_HPKE_SetupR(
-                *self.context,
-                **pk_r,
-                **sk_r,
-                &Item::wrap(enc),
-                &Item::wrap(info),
-            )
-        })
     }
 
     pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
@@ -173,6 +160,71 @@ impl Hpke {
         let v = Item::from_ptr(out)?;
         Ok(unsafe { v.into_vec() })
     }
+}
+
+impl Exporter for HpkeS {
+    fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
+        self.context.export(info, len)
+    }
+}
+
+impl Deref for HpkeS {
+    type Target = Config;
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+#[allow(clippy::module_name_repetitions)]
+pub struct HpkeR {
+    context: HpkeContext,
+    config: Config,
+}
+
+impl HpkeR {
+    /// Create a new context that uses the KEM mode for sending.
+    #[allow(clippy::similar_names)]
+    pub fn new(
+        config: Config,
+        pk_r: &PublicKey,
+        sk_r: &mut PrivateKey,
+        enc: &[u8],
+        info: &[u8],
+    ) -> Res<Self> {
+        let context = HpkeContext::new(config)?;
+        secstatus_to_res(unsafe {
+            sys::PK11_HPKE_SetupR(
+                *context,
+                **pk_r,
+                **sk_r,
+                &Item::wrap(enc),
+                &Item::wrap(info),
+            )
+        })?;
+        Ok(Self { context, config })
+    }
+
+    pub fn config(&self) -> Config {
+        self.config
+    }
+
+    pub fn decode_public_key(kem: KemId::Type, k: &[u8]) -> Res<PublicKey> {
+        // NSS uses a context for this, but we don't want that, but a dummy one works fine.
+        let context = HpkeContext::new(Config {
+            kem,
+            ..Config::default()
+        })?;
+        let mut ptr: *mut sys::SECKEYPublicKey = null_mut();
+        secstatus_to_res(unsafe {
+            sys::PK11_HPKE_Deserialize(
+                *context,
+                k.as_ptr(),
+                c_uint::try_from(k.len()).unwrap(),
+                &mut ptr,
+            )
+        })?;
+        PublicKey::from_ptr(ptr)
+    }
 
     pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
         let mut out: *mut sys::SECItem = null_mut();
@@ -182,23 +234,16 @@ impl Hpke {
         let v = Item::from_ptr(out)?;
         Ok(unsafe { v.into_vec() })
     }
+}
 
-    pub fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
-        let mut out: *mut sys::PK11SymKey = null_mut();
-        secstatus_to_res(unsafe {
-            sys::PK11_HPKE_ExportSecret(
-                *self.context,
-                &Item::wrap(info),
-                c_uint::try_from(len).unwrap(),
-                &mut out,
-            )
-        })?;
-        SymKey::from_ptr(out)
+impl Exporter for HpkeR {
+    fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
+        self.context.export(info, len)
     }
 }
 
-impl Deref for Hpke {
-    type Target = HpkeConfig;
+impl Deref for HpkeR {
+    type Target = Config;
     fn deref(&self) -> &Self::Target {
         &self.config
     }
@@ -263,45 +308,43 @@ pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
 
 #[cfg(test)]
 mod test {
-    use super::{generate_key_pair, AeadId, Hpke, HpkeConfig};
+    use super::{generate_key_pair, AeadId, Config, HpkeR, HpkeS};
     use crate::init;
 
-    #[must_use]
-    fn new_context() -> Hpke {
-        init();
-        Hpke::new(HpkeConfig::default()).unwrap()
-    }
+    const INFO: &[u8] = b"info";
+    const AAD: &[u8] = b"aad";
+    const PT: &[u8] = b"message";
 
+    #[allow(clippy::similar_names)] // for sk_x and pk_x
     #[test]
-    fn make_context() {
-        let _ = new_context();
+    fn make() {
+        init();
+        let cfg = Config::default();
+        let (mut sk_s, pk_s) = generate_key_pair(cfg.kem()).unwrap();
+        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let hpke_s = HpkeS::new(cfg, &pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
+        let _hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
     }
 
-    #[allow(clippy::similar_names)]
+    #[allow(clippy::similar_names)] // for sk_x and pk_x
     fn seal_open(aead: AeadId::Type) {
-        const INFO: &[u8] = b"info";
-        const AAD: &[u8] = b"aad";
-        const PT: &[u8] = b"message";
-
         // Setup
         init();
-        let cfg = HpkeConfig {
+        let cfg = Config {
             aead,
-            ..HpkeConfig::default()
+            ..Config::default()
         };
         assert!(cfg.supported());
-        let mut hpke_s = Hpke::new(cfg).unwrap();
-        let mut hpke_r = Hpke::new(cfg).unwrap();
         let (mut sk_s, pk_s) = generate_key_pair(cfg.kem()).unwrap();
         let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
-        hpke_s.setup_s(&pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
+        let mut hpke_s = HpkeS::new(cfg, &pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
         let enc = hpke_s.enc().unwrap();
         let ct = hpke_s.seal(AAD, PT).unwrap();
 
         // Receive
-        hpke_r.setup_r(&pk_r, &mut sk_r, &enc, INFO).unwrap();
+        let mut hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &enc, INFO).unwrap();
         let pt = hpke_r.open(AAD, &ct).unwrap();
         assert_eq!(&pt[..], PT);
     }
@@ -318,19 +361,19 @@ mod test {
 
     #[test]
     fn bogus_config() {
-        assert!(!HpkeConfig {
+        assert!(!Config {
             kem: 99_999,
-            ..HpkeConfig::default()
+            ..Config::default()
         }
         .supported());
-        assert!(!HpkeConfig {
+        assert!(!Config {
             kdf: 99_999,
-            ..HpkeConfig::default()
+            ..Config::default()
         }
         .supported());
-        assert!(!HpkeConfig {
+        assert!(!Config {
             aead: 99_999,
-            ..HpkeConfig::default()
+            ..Config::default()
         }
         .supported());
     }
