@@ -19,7 +19,8 @@ use std::ptr::null_mut;
     non_upper_case_globals,
     non_camel_case_types,
     non_snake_case,
-    clippy::pedantic
+    clippy::pedantic,
+    clippy::upper_case_acronyms
 )]
 pub mod sys {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
@@ -83,7 +84,7 @@ impl PrivateKey {
         secstatus_to_res(unsafe {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePrivKey,
-                **self as *mut _,
+                (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
                 &mut key_item,
             )
@@ -100,6 +101,25 @@ impl PrivateKey {
     }
 }
 unsafe impl Send for PrivateKey {}
+
+impl Clone for PrivateKey {
+    #[must_use]
+    fn clone(&self) -> Self {
+        let ptr = unsafe { sys::SECKEY_CopyPrivateKey(self.ptr) };
+        assert!(!ptr.is_null());
+        Self { ptr }
+    }
+}
+
+impl std::fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Ok(b) = self.key_data() {
+            write!(f, "PrivateKey {}", hex::encode(b))
+        } else {
+            write!(f, "Opaque PrivateKey")
+        }
+    }
+}
 
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
@@ -122,6 +142,25 @@ impl PublicKey {
 }
 
 unsafe impl Send for PublicKey {}
+
+impl Clone for PublicKey {
+    #[must_use]
+    fn clone(&self) -> Self {
+        let ptr = unsafe { sys::SECKEY_CopyPublicKey(self.ptr) };
+        assert!(!ptr.is_null());
+        Self { ptr }
+    }
+}
+
+impl std::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Ok(b) = self.key_data() {
+            write!(f, "PublicKey {}", hex::encode(b))
+        } else {
+            write!(f, "Opaque PublicKey")
+        }
+    }
+}
 
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
@@ -192,12 +231,13 @@ pub(crate) struct ParamItem<T> {
 
 impl<T: Sized> ParamItem<T> {
     pub fn new(v: &T) -> Self {
-        let slc =
-            unsafe { std::slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
+        let slc = unsafe {
+            std::slice::from_raw_parts((v as *const T).cast::<u8>(), mem::size_of::<T>())
+        };
         let mut params = Vec::from(slc);
         let reference = Box::pin(SECItem {
             type_: SECItemType::siBuffer,
-            data: params.as_mut_ptr() as *mut T as *mut u8,
+            data: params.as_mut_ptr().cast(),
             len: c_uint::try_from(params.len()).unwrap(),
         });
         Self {

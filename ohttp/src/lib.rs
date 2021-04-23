@@ -73,12 +73,12 @@ impl KeyConfig {
     }
 
     /// Construct a configuration for the server side.
-    /// Panics if the configurations don't include a supported configuration.
+    /// # Panics
+    /// If the configurations don't include a supported configuration.
     pub fn new(key_id: u8, kem: KemId::Type, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
         Self::strip_unsupported(&mut symmetric, kem);
         assert!(!symmetric.is_empty());
-        let cfg = HpkeConfig::new(kem, symmetric[0].kdf(), symmetric[0].aead());
-        let (sk, pk) = Hpke::new(cfg)?.generate_key_pair()?;
+        let (sk, pk) = Hpke::generate_key_pair(kem)?;
         Ok(Self {
             key_id,
             kem,
@@ -108,6 +108,8 @@ impl KeyConfig {
     ///   ECHCipherSuite cipher_suites<4..2^16-4>;
     /// } ECHKeyConfig;
     /// ```
+    /// # Panics
+    /// Not as a result of this function.
     pub fn encode(&self) -> Res<Vec<u8>> {
         let mut buf = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
@@ -200,7 +202,7 @@ impl ClientRequest {
 
         // TODO(mt) choose the best config, not just the first.
         let mut hpke = config.create_hpke(config.symmetric[0])?;
-        let (mut sk_s, pk_s) = hpke.generate_key_pair()?;
+        let (mut sk_s, pk_s) = Hpke::generate_key_pair(config.kem)?;
         hpke.setup_s(&pk_s, &mut sk_s, &mut config.pk, INFO_REQUEST)?;
 
         Ok(Self {
@@ -237,7 +239,8 @@ pub struct Server {
 
 impl Server {
     /// Create a new server configuration.
-    /// Panics if the configuration doesn't include a private key.
+    /// # Panics
+    /// If the configuration doesn't include a private key.
     pub fn new(config: KeyConfig) -> Res<Self> {
         assert!(config.sk.is_some());
         Ok(Self { config })
@@ -249,6 +252,9 @@ impl Server {
         &self.config
     }
 
+    /// Remove encapsulation on a message.
+    /// # Panics
+    /// Not as a consequence of this code, but Rust won't know that for sure.
     #[allow(clippy::similar_names)] // for kem_id and key_id
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
         // Can't size_of() for KemId::Type and friends; the AAD covers each of these.

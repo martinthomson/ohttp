@@ -669,6 +669,7 @@ impl Message {
         Ok(())
     }
 
+    /// Read a BHTTP message.
     #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp(r: &mut impl io::BufRead) -> Res<Self> {
         let t = read_varint(r)?.ok_or(Error::Truncated)?;
@@ -676,7 +677,7 @@ impl Message {
         let mode = match t {
             0 | 1 => Mode::KnownLength,
             2 | 3 => Mode::IndefiniteLength,
-            _ => panic!("Unsupported mode"),
+            _ => return Err(Error::InvalidMode),
         };
 
         let mut control = ControlData::read_bhttp(request, r)?;

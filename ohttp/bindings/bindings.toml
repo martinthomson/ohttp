@@ -76,6 +76,8 @@ functions = [
     "PK11_ReadRawAttribute",
     "PK11_ReferenceSymKey",
     "SECITEM_FreeItem",
+    "SECKEY_CopyPrivateKey",
+    "SECKEY_CopyPublicKey",
     "SECKEY_DestroyPrivateKey",
     "SECKEY_DestroyPublicKey",
     "SECOID_FindOIDByTag",

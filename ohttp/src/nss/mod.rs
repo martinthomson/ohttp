@@ -26,7 +26,7 @@ pub use err::Error;
 use lazy_static::lazy_static;
 use std::ptr::null;
 
-#[allow(clippy::pedantic, non_upper_case_globals)]
+#[allow(clippy::pedantic, non_upper_case_globals, clippy::upper_case_acronyms)]
 mod nss_init {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }

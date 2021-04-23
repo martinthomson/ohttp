@@ -4,6 +4,8 @@ pub enum Error {
     CharacterEncoding(std::string::FromUtf8Error),
     /// A field contained an integer value that was out of range.
     IntRange(std::num::TryFromIntError),
+    /// The mode of the message was invalid.
+    InvalidMode,
     /// An IO error.
     Io(std::io::Error),
     /// A field or line was missing a necessary character.

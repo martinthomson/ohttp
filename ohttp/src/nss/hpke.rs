@@ -4,7 +4,7 @@ use super::secstatus_to_res;
 use log::{log_enabled, trace};
 use std::convert::TryFrom;
 use std::ops::Deref;
-use std::os::raw::{c_uint, c_void};
+use std::os::raw::c_uint;
 use std::ptr::{null, null_mut};
 
 pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
@@ -123,8 +123,8 @@ impl Hpke {
     }
 
     /// Generate a key pair for the KEM.
-    pub fn generate_key_pair(&self) -> Res<(PrivateKey, PublicKey)> {
-        assert_eq!(self.config.kem(), KemId::HpkeDhKemX25519Sha256);
+    pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
+        assert_eq!(kem, KemId::HpkeDhKemX25519Sha256);
         let slot = Slot::internal()?;
 
         let oid_data = unsafe { sys::SECOID_FindOIDByTag(sys::SECOidTag::SEC_OID_CURVE25519) };
@@ -139,15 +139,13 @@ impl Hpke {
 
         let mut public_ptr: *mut sys::SECKEYPublicKey = null_mut();
 
-        // If we have tracing on, make sure that we can read the key data.
-        // This makes the key insensitive, which isn't ideal.
-        let mut attempt_trace = log_enabled!(log::Level::Trace);
-        let insensitive_secret_ptr = if attempt_trace {
+        // Try to make an insensitive key so that we can read the key data for tracing.
+        let insensitive_secret_ptr = if log_enabled!(log::Level::Trace) {
             unsafe {
                 sys::PK11_GenerateKeyPairWithOpFlags(
                     *slot,
                     sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                    &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                    (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
                     &mut public_ptr,
                     sys::PK11_ATTR_SESSION | sys::PK11_ATTR_INSENSITIVE | sys::PK11_ATTR_PUBLIC,
                     sys::CK_FLAGS::from(sys::CKF_DERIVE),
@@ -160,12 +158,11 @@ impl Hpke {
         };
         assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
         let secret_ptr = if insensitive_secret_ptr.is_null() {
-            attempt_trace = false;
             unsafe {
                 sys::PK11_GenerateKeyPairWithOpFlags(
                     *slot,
                     sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                    &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                    (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
                     &mut public_ptr,
                     sys::PK11_ATTR_SESSION | sys::PK11_ATTR_SENSITIVE | sys::PK11_ATTR_PRIVATE,
                     sys::CK_FLAGS::from(sys::CKF_DERIVE),
@@ -179,15 +176,7 @@ impl Hpke {
         assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
         let sk = PrivateKey::from_ptr(secret_ptr)?;
         let pk = PublicKey::from_ptr(public_ptr)?;
-        if attempt_trace {
-            // This code is executed sometimes when logging is not enabled.
-            // Hence the extra guard.
-            trace!(
-                "Generated key pair: sk={} pk={}",
-                hex::encode(sk.key_data()?),
-                hex::encode(pk.key_data()?),
-            );
-        }
+        trace!("Generated key pair: sk={:?} pk={:?}", sk, pk);
         Ok((sk, pk))
     }
 
@@ -239,7 +228,7 @@ impl Hpke {
         secstatus_to_res(unsafe {
             sys::PK11_HPKE_Seal(*self.context, &Item::wrap(aad), &Item::wrap(pt), &mut out)
         })?;
-        let v = Item::from_ptr(out as *mut _)?;
+        let v = Item::from_ptr(out)?;
         Ok(unsafe { v.into_vec() })
     }
 
@@ -304,8 +293,8 @@ mod test {
         assert!(cfg.supported());
         let mut hpke_s = Hpke::new(cfg).unwrap();
         let mut hpke_r = Hpke::new(cfg).unwrap();
-        let (mut sk_s, pk_s) = hpke_s.generate_key_pair().unwrap();
-        let (mut sk_r, mut pk_r) = hpke_r.generate_key_pair().unwrap();
+        let (mut sk_s, pk_s) = Hpke::generate_key_pair(cfg.kem()).unwrap();
+        let (mut sk_r, mut pk_r) = Hpke::generate_key_pair(cfg.kem()).unwrap();
 
         // Send
         hpke_s.setup_s(&pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();

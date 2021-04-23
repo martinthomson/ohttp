@@ -14,6 +14,7 @@ use std::ptr::null_mut;
 #[derive(Clone, Copy)]
 pub enum KeyMechanism {
     Aead(AeadId::Type),
+    #[allow(dead_code)] // We don't use this one.
     Hkdf,
 }
 
