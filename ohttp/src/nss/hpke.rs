@@ -1,3 +1,4 @@
+use super::super::hpke::{Aead, Kdf, Kem};
 use super::err::{sec::SEC_ERROR_INVALID_ARGS, Error, Res};
 use super::p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey};
 use super::secstatus_to_res;
@@ -12,71 +13,46 @@ pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
 /// Configuration for `Hpke`.
 #[derive(Clone, Copy)]
 pub struct Config {
-    kem: KemId::Type,
-    kdf: KdfId::Type,
-    aead: AeadId::Type,
+    kem: Kem,
+    kdf: Kdf,
+    aead: Aead,
 }
 
 impl Config {
-    pub fn new(kem: KemId::Type, kdf: KdfId::Type, aead: AeadId::Type) -> Self {
+    pub fn new(kem: Kem, kdf: Kdf, aead: Aead) -> Self {
         Self { kem, kdf, aead }
     }
 
-    pub fn kem(&self) -> KemId::Type {
+    pub fn kem(self) -> Kem {
         self.kem
     }
 
-    pub fn kdf(&self) -> KdfId::Type {
+    pub fn kdf(self) -> Kdf {
         self.kdf
     }
 
-    pub fn aead(&self) -> AeadId::Type {
+    pub fn aead(self) -> Aead {
         self.aead
     }
 
-    pub fn supported(&self) -> bool {
+    pub fn supported(self) -> bool {
         secstatus_to_res(unsafe {
-            sys::PK11_HPKE_ValidateParameters(self.kem, self.kdf, self.aead)
+            sys::PK11_HPKE_ValidateParameters(
+                KemId::Type::from(u16::from(self.kem)),
+                KdfId::Type::from(u16::from(self.kdf)),
+                AeadId::Type::from(u16::from(self.aead)),
+            )
         })
         .is_ok()
-    }
-
-    pub fn n_enc(&self) -> usize {
-        match self.kem {
-            KemId::HpkeDhKemX25519Sha256 => 32,
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn n_pk(&self) -> usize {
-        match self.kem {
-            KemId::HpkeDhKemX25519Sha256 => 32,
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn n_k(&self) -> usize {
-        match self.aead {
-            AeadId::HpkeAeadAes128Gcm => 16,
-            AeadId::HpkeAeadChaCha20Poly1305 => 32,
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn n_n(&self) -> usize {
-        match self.aead {
-            AeadId::HpkeAeadAes128Gcm | AeadId::HpkeAeadChaCha20Poly1305 => 12,
-            _ => unimplemented!(),
-        }
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            kem: KemId::HpkeDhKemX25519Sha256,
-            kdf: KdfId::HpkeKdfHkdfSha256,
-            aead: AeadId::HpkeAeadAes128Gcm,
+            kem: Kem::X25519Sha256,
+            kdf: Kdf::HkdfSha256,
+            aead: Aead::Aes128Gcm,
         }
     }
 }
@@ -94,7 +70,13 @@ scoped_ptr!(HpkeContext, sys::HpkeContext, destroy_hpke_context);
 impl HpkeContext {
     fn new(config: Config) -> Res<Self> {
         let ptr = unsafe {
-            sys::PK11_HPKE_NewContext(config.kem, config.kdf, config.aead, null_mut(), null())
+            sys::PK11_HPKE_NewContext(
+                KemId::Type::from(u16::from(config.kem)),
+                KdfId::Type::from(u16::from(config.kdf)),
+                AeadId::Type::from(u16::from(config.aead)),
+                null_mut(),
+                null(),
+            )
         };
         Self::from_ptr(ptr)
     }
@@ -208,7 +190,7 @@ impl HpkeR {
         self.config
     }
 
-    pub fn decode_public_key(kem: KemId::Type, k: &[u8]) -> Res<PublicKey> {
+    pub fn decode_public_key(kem: Kem, k: &[u8]) -> Res<PublicKey> {
         // NSS uses a context for this, but we don't want that, but a dummy one works fine.
         let context = HpkeContext::new(Config {
             kem,
@@ -250,8 +232,8 @@ impl Deref for HpkeR {
 }
 
 /// Generate a key pair for the identified KEM.
-pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
-    assert_eq!(kem, KemId::HpkeDhKemX25519Sha256);
+pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
+    assert_eq!(kem, Kem::X25519Sha256);
     let slot = Slot::internal()?;
 
     let oid_data = unsafe { sys::SECOID_FindOIDByTag(sys::SECOidTag::SEC_OID_CURVE25519) };
@@ -308,7 +290,8 @@ pub fn generate_key_pair(kem: KemId::Type) -> Res<(PrivateKey, PublicKey)> {
 
 #[cfg(test)]
 mod test {
-    use super::{generate_key_pair, AeadId, Config, HpkeR, HpkeS};
+    use super::{generate_key_pair, Config, HpkeR, HpkeS};
+    use crate::hpke::Aead;
     use crate::init;
 
     const INFO: &[u8] = b"info";
@@ -327,7 +310,7 @@ mod test {
     }
 
     #[allow(clippy::similar_names)] // for sk_x and pk_x
-    fn seal_open(aead: AeadId::Type) {
+    fn seal_open(aead: Aead) {
         // Setup
         init();
         let cfg = Config {
@@ -351,30 +334,11 @@ mod test {
 
     #[test]
     fn seal_open_gcm() {
-        seal_open(AeadId::HpkeAeadAes128Gcm);
+        seal_open(Aead::Aes128Gcm);
     }
 
     #[test]
     fn seal_open_chacha() {
-        seal_open(AeadId::HpkeAeadChaCha20Poly1305);
-    }
-
-    #[test]
-    fn bogus_config() {
-        assert!(!Config {
-            kem: 99_999,
-            ..Config::default()
-        }
-        .supported());
-        assert!(!Config {
-            kdf: 99_999,
-            ..Config::default()
-        }
-        .supported());
-        assert!(!Config {
-            aead: 99_999,
-            ..Config::default()
-        }
-        .supported());
+        seal_open(Aead::ChaCha20Poly1305);
     }
 }

@@ -2,13 +2,14 @@
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
 
 mod err;
+pub mod hpke;
 mod nss;
 mod rw;
 
 pub use err::Error;
-pub use nss::hpke::{AeadId, KdfId, KemId};
 
 use err::Res;
+use hpke::{Aead as AeadId, Kdf, Kem};
 use nss::aead::{Aead, Mode, NONCE_LEN};
 use nss::hkdf::{Hkdf, KeyMechanism};
 use nss::hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS};
@@ -35,23 +36,23 @@ pub fn init() {
 /// A tuple of KDF and AEAD identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct SymmetricSuite {
-    kdf: KdfId::Type,
-    aead: AeadId::Type,
+    kdf: Kdf,
+    aead: AeadId,
 }
 
 impl SymmetricSuite {
     #[must_use]
-    pub const fn new(kdf: KdfId::Type, aead: AeadId::Type) -> Self {
+    pub const fn new(kdf: Kdf, aead: AeadId) -> Self {
         Self { kdf, aead }
     }
 
     #[must_use]
-    pub fn kdf(self) -> KdfId::Type {
+    pub fn kdf(self) -> Kdf {
         self.kdf
     }
 
     #[must_use]
-    pub fn aead(self) -> AeadId::Type {
+    pub fn aead(self) -> AeadId {
         self.aead
     }
 }
@@ -61,21 +62,21 @@ impl SymmetricSuite {
 /// any combination of KEM, KDF, and AEAD that is not supported.
 pub struct KeyConfig {
     key_id: KeyId,
-    kem: KemId::Type,
+    kem: Kem,
     symmetric: Vec<SymmetricSuite>,
     sk: Option<PrivateKey>,
     pk: PublicKey,
 }
 
 impl KeyConfig {
-    fn strip_unsupported(symmetric: &mut Vec<SymmetricSuite>, kem: KemId::Type) {
+    fn strip_unsupported(symmetric: &mut Vec<SymmetricSuite>, kem: Kem) {
         symmetric.retain(|s| HpkeConfig::new(kem, s.kdf(), s.aead()).supported());
     }
 
     /// Construct a configuration for the server side.
     /// # Panics
     /// If the configurations don't include a supported configuration.
-    pub fn new(key_id: u8, kem: KemId::Type, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
+    pub fn new(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
         Self::strip_unsupported(&mut symmetric, kem);
         assert!(!symmetric.is_empty());
         let (sk, pk) = generate_key_pair(kem)?;
@@ -113,7 +114,7 @@ impl KeyConfig {
     pub fn encode(&self) -> Res<Vec<u8>> {
         let mut buf = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
-        write_uint(2, self.kem, &mut buf)?;
+        write_uint(2, u16::from(self.kem), &mut buf)?;
         let pk_buf = self.pk.key_data()?;
         buf.extend_from_slice(&pk_buf);
         write_uint(
@@ -122,8 +123,8 @@ impl KeyConfig {
             &mut buf,
         )?;
         for s in &self.symmetric {
-            write_uint(2, s.kdf(), &mut buf)?;
-            write_uint(2, s.aead(), &mut buf)?;
+            write_uint(2, u16::from(s.kdf()), &mut buf)?;
+            write_uint(2, u16::from(s.aead()), &mut buf)?;
         }
         Ok(buf)
     }
@@ -133,14 +134,14 @@ impl KeyConfig {
     fn parse(encoded_config: &[u8]) -> Res<Self> {
         let mut r = BufReader::new(encoded_config);
         let key_id = KeyId::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
-        let kem = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let kem = Kem::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
 
         // Note that the KDF and AEAD doesn't matter here.
-        let kem_config = HpkeConfig::new(kem, KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadAes128Gcm);
+        let kem_config = HpkeConfig::new(kem, Kdf::HkdfSha256, AeadId::Aes128Gcm);
         if !kem_config.supported() {
             return Err(Error::Unsupported);
         }
-        let mut pk_buf = vec![0; kem_config.n_pk()];
+        let mut pk_buf = vec![0; kem_config.kem().n_pk()];
         r.read_exact(&mut pk_buf)?;
 
         let sym = read_uvec(2, &mut r)?;
@@ -151,8 +152,8 @@ impl KeyConfig {
         let mut sym_r = BufReader::new(&sym[..]);
         let mut symmetric = Vec::with_capacity(sym_count);
         for _ in 0..sym_count {
-            let kdf = KdfId::Type::try_from(read_uint(2, &mut sym_r)?).unwrap();
-            let aead = AeadId::Type::try_from(read_uint(2, &mut sym_r)?).unwrap();
+            let kdf = Kdf::try_from(u16::try_from(read_uint(2, &mut sym_r)?).unwrap())?;
+            let aead = AeadId::try_from(u16::try_from(read_uint(2, &mut sym_r)?).unwrap())?;
             symmetric.push(SymmetricSuite::new(kdf, aead));
         }
 
@@ -221,9 +222,9 @@ impl ClientRequest {
         // AAD is this header
         let mut enc_request = Vec::new();
         write_uint(size_of::<KeyId>(), self.key_id, &mut enc_request)?;
-        write_uint(2, self.hpke.kem(), &mut enc_request)?;
-        write_uint(2, self.hpke.kdf(), &mut enc_request)?;
-        write_uint(2, self.hpke.aead(), &mut enc_request)?;
+        write_uint(2, u16::from(self.hpke.kem()), &mut enc_request)?;
+        write_uint(2, u16::from(self.hpke.kdf()), &mut enc_request)?;
+        write_uint(2, u16::from(self.hpke.aead()), &mut enc_request)?;
 
         let mut ct = self.hpke.seal(&enc_request, request)?;
         let enc = self.hpke.enc()?;
@@ -272,16 +273,16 @@ impl Server {
         if key_id != self.config.key_id {
             return Err(Error::KeyId);
         }
-        let kem_id = KemId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let kem_id = Kem::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
         if kem_id != self.config.kem {
             return Err(Error::InvalidKem);
         }
-        let kdf_id = KdfId::Type::try_from(read_uint(2, &mut r)?).unwrap();
-        let aead_id = AeadId::Type::try_from(read_uint(2, &mut r)?).unwrap();
+        let kdf_id = Kdf::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
+        let aead_id = AeadId::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
         let sym = SymmetricSuite::new(kdf_id, aead_id);
 
         let cfg = self.config.select(sym)?;
-        let mut enc = vec![0; cfg.n_enc()];
+        let mut enc = vec![0; cfg.kem().n_enc()];
         r.read_exact(&mut enc)?;
         let mut hpke = HpkeR::new(
             cfg,
@@ -300,7 +301,7 @@ impl Server {
 }
 
 fn entropy(config: HpkeConfig) -> usize {
-    max(config.n_n(), config.n_k())
+    max(config.aead().n_n(), config.aead().n_k())
 }
 
 fn make_aead(
@@ -318,7 +319,7 @@ fn make_aead(
     let prk = hkdf.extract(&salt, &secret)?;
 
     let key = hkdf.expand_key(&prk, INFO_KEY, KeyMechanism::Aead(cfg.aead()))?;
-    let iv = hkdf.expand_data(&prk, INFO_NONCE, cfg.n_n())?;
+    let iv = hkdf.expand_data(&prk, INFO_NONCE, cfg.aead().n_n())?;
     let nonce_base = <[u8; NONCE_LEN]>::try_from(iv).unwrap();
 
     Ok(Aead::new(mode, cfg.aead(), &key, nonce_base)?)
@@ -383,15 +384,15 @@ impl ClientResponse {
 
 #[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
-    use crate::nss::hpke::{AeadId, KdfId, KemId};
+    use crate::hpke::{Aead, Kdf, Kem};
     use crate::{ClientRequest, KeyConfig, KeyId, Server, SymmetricSuite};
     use log::trace;
 
     const KEY_ID: KeyId = 1;
-    const KEM: KemId::Type = KemId::HpkeDhKemX25519Sha256;
+    const KEM: Kem = Kem::X25519Sha256;
     const SYMMETRIC: &[SymmetricSuite] = &[
-        SymmetricSuite::new(KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadAes128Gcm),
-        SymmetricSuite::new(KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadChaCha20Poly1305),
+        SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm),
+        SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305),
     ];
 
     const REQUEST: &[u8] = &[

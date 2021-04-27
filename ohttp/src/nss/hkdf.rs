@@ -1,9 +1,9 @@
+use super::super::hpke::{Aead, Kdf};
 use super::err::Res;
 use super::p11::sys::{
-    self, HpkeAeadId as AeadId, HpkeKdfId as KdfId, CKA_DERIVE, CKF_HKDF_SALT_DATA,
-    CKF_HKDF_SALT_NULL, CKM_AES_GCM, CKM_CHACHA20_POLY1305, CKM_HKDF_DATA, CKM_HKDF_DERIVE,
-    CKM_SHA256, CK_BBOOL, CK_HKDF_PARAMS, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_OBJECT_HANDLE,
-    CK_ULONG,
+    self, CKA_DERIVE, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_AES_GCM, CKM_CHACHA20_POLY1305,
+    CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_SHA256, CK_BBOOL, CK_HKDF_PARAMS, CK_INVALID_HANDLE,
+    CK_MECHANISM_TYPE, CK_OBJECT_HANDLE, CK_ULONG,
 };
 use super::p11::{ParamItem, SymKey};
 use log::trace;
@@ -13,7 +13,7 @@ use std::ptr::null_mut;
 
 #[derive(Clone, Copy)]
 pub enum KeyMechanism {
-    Aead(AeadId::Type),
+    Aead(Aead),
     #[allow(dead_code)] // We don't use this one.
     Hkdf,
 }
@@ -21,29 +21,26 @@ pub enum KeyMechanism {
 impl KeyMechanism {
     fn mech(self) -> CK_MECHANISM_TYPE {
         CK_MECHANISM_TYPE::from(match self {
-            Self::Aead(AeadId::HpkeAeadAes128Gcm) => CKM_AES_GCM,
-            Self::Aead(AeadId::HpkeAeadChaCha20Poly1305) => CKM_CHACHA20_POLY1305,
+            Self::Aead(Aead::Aes128Gcm) | Self::Aead(Aead::Aes256Gcm) => CKM_AES_GCM,
+            Self::Aead(Aead::ChaCha20Poly1305) => CKM_CHACHA20_POLY1305,
             Self::Hkdf => CKM_HKDF_DERIVE,
-            _ => unimplemented!(),
         })
     }
 
     fn len(self) -> usize {
         match self {
-            Self::Aead(AeadId::HpkeAeadAes128Gcm) => 16,
-            Self::Aead(AeadId::HpkeAeadChaCha20Poly1305) => 32,
+            Self::Aead(a) => a.n_k(),
             Self::Hkdf => 0, // Let the underlying module decide.
-            _ => unimplemented!(),
         }
     }
 }
 
 pub struct Hkdf {
-    kdf: KdfId::Type,
+    kdf: Kdf,
 }
 
 impl Hkdf {
-    pub fn new(kdf: KdfId::Type) -> Self {
+    pub fn new(kdf: Kdf) -> Self {
         Self { kdf }
     }
 
@@ -65,7 +62,7 @@ impl Hkdf {
 
     fn mech(&self) -> CK_MECHANISM_TYPE {
         CK_MECHANISM_TYPE::from(match self.kdf {
-            KdfId::HpkeKdfHkdfSha256 => CKM_SHA256,
+            Kdf::HkdfSha256 => CKM_SHA256,
             _ => unimplemented!(),
         })
     }
@@ -168,7 +165,7 @@ impl Hkdf {
 
 #[cfg(test)]
 mod test {
-    use super::super::hpke::KdfId;
+    use super::super::super::hpke::Kdf;
     use super::Hkdf;
     use crate::init;
 
@@ -181,7 +178,7 @@ mod test {
         expected_okm: &[u8],
     ) {
         init();
-        let hkdf = Hkdf::new(KdfId::HpkeKdfHkdfSha256);
+        let hkdf = Hkdf::new(Kdf::HkdfSha256);
         let k_ikm = Hkdf::import_ikm(ikm).unwrap();
         let prk = hkdf.extract(salt, &k_ikm).unwrap();
         let prk_data = prk.key_data().unwrap();

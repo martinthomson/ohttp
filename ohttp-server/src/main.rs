@@ -1,5 +1,8 @@
 use bhttp::{Message, Mode};
-use ohttp::{AeadId, KdfId, KemId, KeyConfig, Server as OhttpServer, SymmetricSuite};
+use ohttp::{
+    hpke::{Aead, Kdf, Kem},
+    KeyConfig, Server as OhttpServer, SymmetricSuite,
+};
 use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -10,7 +13,7 @@ use warp::Filter;
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "ohttp-server", about = "Server oblivious HTTP requests.")]
+#[structopt(name = "ohttp-server", about = "Serve oblivious HTTP requests.")]
 struct Args {
     /// The address to bind to.
     #[structopt(default_value = "127.0.0.1:9443")]
@@ -97,10 +100,10 @@ async fn main() -> Res<()> {
 
     let config = KeyConfig::new(
         0,
-        KemId::HpkeDhKemX25519Sha256,
+        Kem::X25519Sha256,
         vec![
-            SymmetricSuite::new(KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadAes128Gcm),
-            SymmetricSuite::new(KdfId::HpkeKdfHkdfSha256, AeadId::HpkeAeadChaCha20Poly1305),
+            SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm),
+            SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305),
         ],
     )?;
     let ohttp = OhttpServer::new(config)?;

@@ -1,9 +1,9 @@
+use super::super::hpke::Aead as AeadId;
 use super::err::{secstatus_to_res, Res};
 use super::p11::sys::{
-    self, HpkeAeadId as AeadId, PK11Context, PK11_AEADOp, PK11_CreateContextBySymKey, PRBool,
-    CKA_DECRYPT, CKA_ENCRYPT, CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE,
-    CKM_AES_GCM, CKM_CHACHA20_POLY1305, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION,
-    CK_MECHANISM_TYPE,
+    self, PK11Context, PK11_AEADOp, PK11_CreateContextBySymKey, PRBool, CKA_DECRYPT, CKA_ENCRYPT,
+    CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305,
+    CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
 };
 use super::p11::{Item, SymKey};
 use log::trace;
@@ -61,17 +61,16 @@ pub struct Aead {
 }
 
 impl Aead {
-    fn mech(algorithm: AeadId::Type) -> CK_MECHANISM_TYPE {
+    fn mech(algorithm: AeadId) -> CK_MECHANISM_TYPE {
         CK_MECHANISM_TYPE::from(match algorithm {
             // The key size determines which AES variant is used.
-            AeadId::HpkeAeadAes128Gcm => CKM_AES_GCM,
-            AeadId::HpkeAeadChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
-            _ => unimplemented!(),
+            AeadId::Aes128Gcm | AeadId::Aes256Gcm => CKM_AES_GCM,
+            AeadId::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
         })
     }
 
     #[cfg(test)]
-    pub fn import_key(algorithm: AeadId::Type, key: &[u8]) -> Res<SymKey> {
+    pub fn import_key(algorithm: AeadId, key: &[u8]) -> Res<SymKey> {
         let slot = super::p11::Slot::internal()?;
         let ptr = unsafe {
             sys::PK11_ImportSymKey(
@@ -88,7 +87,7 @@ impl Aead {
 
     pub fn new(
         mode: Mode,
-        algorithm: AeadId::Type,
+        algorithm: AeadId,
         key: &SymKey,
         nonce_base: [u8; NONCE_LEN],
     ) -> Res<Self> {
@@ -182,14 +181,14 @@ impl Aead {
 
 #[cfg(test)]
 mod test {
-    use super::super::hpke::AeadId;
+    use super::super::super::hpke::Aead as AeadId;
     use super::super::init;
     use super::{Aead, Mode, SequenceNumber, NONCE_LEN};
 
     /// Check that the first invocation of encryption matches expected values.
     /// Also check decryption of the same.
     fn check0(
-        algorithm: AeadId::Type,
+        algorithm: AeadId,
         key: &[u8],
         nonce: &[u8; NONCE_LEN],
         aad: &[u8],
@@ -209,7 +208,7 @@ mod test {
     }
 
     fn decrypt(
-        algorithm: AeadId::Type,
+        algorithm: AeadId,
         key: &[u8],
         nonce: &[u8; NONCE_LEN],
         seq: SequenceNumber,
@@ -243,12 +242,12 @@ mod test {
             0x04, 0xa2, 0x65, 0xba, 0x2e, 0xff, 0x4d, 0x82, 0x90, 0x58, 0xfb, 0x3f, 0x0f, 0x24,
             0x96, 0xba,
         ];
-        check0(AeadId::HpkeAeadAes128Gcm, KEY, NONCE, AAD, &[], CT);
+        check0(AeadId::Aes128Gcm, KEY, NONCE, AAD, &[], CT);
     }
 
     #[test]
     fn quic_server_initial() {
-        const ALG: AeadId::Type = AeadId::HpkeAeadAes128Gcm;
+        const ALG: AeadId = AeadId::Aes128Gcm;
         const KEY: &[u8] = &[
             0xcf, 0x3a, 0x53, 0x31, 0x65, 0x3c, 0x36, 0x4c, 0x88, 0xf0, 0xf3, 0x79, 0xb6, 0x06,
             0x7e, 0x37,
@@ -292,7 +291,7 @@ mod test {
 
     #[test]
     fn quic_chacha() {
-        const ALG: AeadId::Type = AeadId::HpkeAeadChaCha20Poly1305;
+        const ALG: AeadId = AeadId::ChaCha20Poly1305;
         const KEY: &[u8] = &[
             0xc6, 0xd9, 0x8f, 0xf3, 0x44, 0x1c, 0x3f, 0xe1, 0xb2, 0x18, 0x20, 0x94, 0xf6, 0x9c,
             0xaa, 0x2e, 0xd4, 0xb7, 0x16, 0xb6, 0x54, 0x88, 0x96, 0x0a, 0x7a, 0x98, 0x49, 0x79,
