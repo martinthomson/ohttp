@@ -102,7 +102,7 @@ impl Aead {
                 Self::mech(algorithm),
                 mode.p11mode(),
                 **key,
-                &mut Item::wrap(&nonce_base[..]),
+                &Item::wrap(&nonce_base[..]),
             )
         };
         Ok(Self {

@@ -1,4 +1,4 @@
-#![deny(clippy::pedantic)]
+#![deny(warnings, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
 
 mod err;

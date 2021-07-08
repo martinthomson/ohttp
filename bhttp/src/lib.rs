@@ -1,4 +1,4 @@
-#![deny(clippy::pedantic)]
+#![deny(warnings, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
 #[cfg(feature = "read-bhttp")]
@@ -620,7 +620,7 @@ impl Message {
             let mut content = Vec::new();
             if let Some(cl) = header.get(CONTENT_LENGTH) {
                 let cl_str = String::from_utf8(Vec::from(cl))?;
-                let cl_int = usize::from_str_radix(&cl_str, 10)?;
+                let cl_int = cl_str.parse::<usize>()?;
                 content.resize(cl_int, 0);
                 r.read_exact(&mut content)?;
             } else {

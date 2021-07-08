@@ -15,12 +15,13 @@ use std::pin::Pin;
 use std::ptr::null_mut;
 
 #[allow(
+    clippy::pedantic,
+    clippy::upper_case_acronyms,
     dead_code,
-    non_upper_case_globals,
+    deref_nullptr,
     non_camel_case_types,
     non_snake_case,
-    clippy::pedantic,
-    clippy::upper_case_acronyms
+    non_upper_case_globals
 )]
 pub mod sys {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));

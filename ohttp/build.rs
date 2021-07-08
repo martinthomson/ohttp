@@ -107,7 +107,7 @@ fn get_bash() -> PathBuf {
     }
 }
 
-fn build_nss(dir: PathBuf) {
+fn build_nss(dir: &Path) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
@@ -252,10 +252,10 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String]) {
         .expect("couldn't write bindings");
 }
 
-fn build(nss: &PathBuf) -> Vec<String> {
+fn build(nss: &Path) -> Vec<String> {
     setup_clang();
 
-    build_nss(nss.clone());
+    build_nss(nss);
 
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
