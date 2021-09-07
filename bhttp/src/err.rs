@@ -1,5 +1,7 @@
 #[derive(Debug)]
 pub enum Error {
+    /// A request used the CONNECT method.
+    ConnectUnsupported,
     /// A field contained invalid Unicode.
     CharacterEncoding(std::string::FromUtf8Error),
     /// A field contained an integer value that was out of range.
@@ -18,6 +20,8 @@ pub enum Error {
     ParseInt(std::num::ParseIntError),
     /// A field was truncated.
     Truncated,
+    /// A message included the Upgrade field.
+    UpgradeUnsupported,
     /// A URL could not be parsed into components.
     UrlParse(url::ParseError),
 }

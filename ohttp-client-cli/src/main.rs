@@ -1,12 +1,10 @@
 use bhttp::{Message, Mode};
 use ohttp::{init, ClientRequest};
-use std::io;
-use std::io::BufRead;
-use std::io::Write;
+use std::io::{self, BufRead, Write};
 
 fn main() {
     init();
-    let mut input = io::BufReader::new(std::io::stdin());
+    let mut input = io::BufReader::new(io::stdin());
     print!("Config: ");
     io::stdout().flush().unwrap();
     let mut cfg = String::new();

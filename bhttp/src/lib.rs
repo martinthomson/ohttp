@@ -134,10 +134,11 @@ impl FieldSection {
     #[cfg(feature = "read-http")]
     fn strip_connection_headers(&mut self) {
         const CONNECTION: &[u8] = b"connection";
+        const PROXY_CONNECTION: &[u8] = b"proxy-connection";
         const SHOULD_REMOVE: &[&[u8]] = &[
-            b"connection",
+            CONNECTION,
+            PROXY_CONNECTION,
             b"keep-alive",
-            b"proxy-connection",
             b"te",
             b"trailer",
             b"transfer-encoding",
@@ -152,7 +153,11 @@ impl FieldSection {
             }
         };
 
-        for f in self.0.iter().filter(|f| f.name() == CONNECTION) {
+        for f in self
+            .0
+            .iter()
+            .filter(|f| f.name() == CONNECTION || f.name == PROXY_CONNECTION)
+        {
             let mut v = f.value();
             while let Some(i) = index_of(COMMA, v) {
                 track(&v[..i]);
@@ -376,6 +381,9 @@ impl ControlData {
                 path: Vec::from(path.as_bytes()),
             })
         } else {
+            if a == b"CONNECT" {
+                return Err(Error::ConnectUnsupported);
+            }
             Ok(Self::Request {
                 method: a,
                 scheme: Vec::from(&b"https"[..]),
@@ -726,5 +734,13 @@ impl Message {
         }
         self.trailer.write_bhttp(mode, w)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let mut buf = Vec::new();
+        self.write_http(&mut buf).map_err(|_| std::fmt::Error)?;
+        write!(f, "{:?}", String::from_utf8_lossy(&buf))
     }
 }

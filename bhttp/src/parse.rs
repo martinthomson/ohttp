@@ -63,7 +63,10 @@ pub fn split_at(v: u8, mut line: Vec<u8>) -> Option<(Vec<u8>, Vec<u8>)> {
 pub fn read_line(r: &mut impl std::io::BufRead) -> Res<Vec<u8>> {
     let mut buf = Vec::new();
     r.read_until(NL, &mut buf)?;
-    assert_eq!(buf.pop().unwrap(), NL); // TODO (deal with EOF)
+    let tail = buf.pop();
+    if tail != Some(NL) {
+        return Err(Error::Truncated);
+    }
     if buf.pop().ok_or(Error::Missing(CR))? == CR {
         Ok(buf)
     } else {

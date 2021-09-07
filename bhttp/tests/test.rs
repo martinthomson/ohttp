@@ -1,11 +1,22 @@
 // Rather than grapple with #[cfg(...)] for every variable and import.
 #![cfg(all(feature = "http", feature = "bhttp"))]
 
-use bhttp::Message;
-use bhttp::Mode;
+use bhttp::{Error, Message, Mode};
 use std::io::BufReader;
 
-const CHUNKED_HTTP: &[u8] = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: camel, chunked\r\n\r\n4\r\nThis\r\n6\r\n conte\r\n13;chunk-extension=foo\r\nnt contains CRLF.\r\n\r\n0\r\nTrailer: text\r\n\r\n";
+const CHUNKED_HTTP: &[u8] = b"HTTP/1.1 200 OK\r\n\
+                              Transfer-Encoding: camel, chunked\r\n\
+                              \r\n\
+                              4\r\n\
+                              This\r\n\
+                              6\r\n \
+                              conte\r\n\
+                              13;chunk-extension=foo\r\n\
+                              nt contains CRLF.\r\n\
+                              \r\n\
+                              0\r\n\
+                              Trailer: text\r\n\
+                              \r\n";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED_KNOWN: &[u8] = &[
     0x01, 0x40, 0xc8, 0x00, 0x1d, 0x54, 0x68, 0x69, 0x73, 0x20, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e,
@@ -19,7 +30,11 @@ const CHUNKED_INDEFINITE: &[u8] = &[
     0x00,
 ];
 
-const REQUEST: &[u8] = b"GET /hello.txt HTTP/1.1\r\nuser-agent: curl/7.16.3 libcurl/7.16.3 OpenSSL/0.9.7l zlib/1.2.3\r\nhost: www.example.com\r\naccept-language: en, mi\r\n\r\n";
+const REQUEST: &[u8] = b"GET /hello.txt HTTP/1.1\r\n\
+                         user-agent: curl/7.16.3 libcurl/7.16.3 OpenSSL/0.9.7l zlib/1.2.3\r\n\
+                         host: www.example.com\r\n\
+                         accept-language: en, mi\r\n\
+                         \r\n";
 const REQUEST_KNOWN: &[u8] = &[
     0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x00, 0x0a, 0x2f, 0x68, 0x65,
     0x6c, 0x6c, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x40, 0x6c, 0x0a, 0x75, 0x73, 0x65, 0x72, 0x2d, 0x61,
@@ -130,4 +145,65 @@ fn tiny_response() {
     assert!(m.header().is_empty());
     assert!(m.content().is_empty());
     assert!(m.trailer().is_empty());
+}
+
+#[test]
+fn connect_request() {
+    const REQUEST: &[u8] = b"CONNECT test.example HTTP/1.1\r\n\
+                             Host: example.com\r\n\
+                             \r\n";
+    let err = Message::read_http(&mut BufReader::new(REQUEST)).unwrap_err();
+    assert!(matches!(err, Error::ConnectUnsupported));
+}
+
+/// Verify that Connection and Proxy-Connection are stripped out properly.
+#[test]
+fn connection_header() {
+    const REQUEST: &[u8] = b"POST test.example HTTP/1.1\r\n\
+                             Host: example.com\r\n\
+                             other: test\r\n\
+                             Connection: sample\r\n\
+                             Connection: other, garbage\r\n\
+                             sample: test2\r\n\
+                             px: test3\r\n\
+                             proXy-connection: px\r\n\
+                             \r\n";
+
+    let m = Message::read_http(&mut BufReader::new(REQUEST)).unwrap();
+    assert!(m.header().get(b"other").is_none());
+    assert!(m.header().get(b"sample").is_none());
+    assert!(m.header().get(b"garbage").is_none());
+    assert!(m.header().get(b"connection").is_none());
+    assert!(m.header().get(b"proxy-connection").is_none());
+    assert!(m.header().get(b"px").is_none());
+}
+
+/// Verify that hop-by-hop headers (other than transfer-encoding) are stripped out properly.
+#[test]
+fn hop_by_hop() {
+    const REQUEST: &[u8] = b"POST test.example HTTP/1.1\r\n\
+                             Host: example.com\r\n\
+                             keep-alive: 1\r\n\
+                             te: trailers\r\n\
+                             trailer: te\r\n\
+                             upgrade: h2c\r\n\
+                             \r\n";
+
+    let m = Message::read_http(&mut BufReader::new(REQUEST)).unwrap();
+    assert!(m.header().get(b"keep-alive").is_none());
+    assert!(m.header().get(b"te").is_none());
+    assert!(m.header().get(b"trailer").is_none());
+    assert!(m.header().get(b"transfer-encoding").is_none());
+    assert!(m.header().get(b"upgrade").is_none());
+}
+
+/// Verify that very bad chunked encoding produces a result.
+#[test]
+fn bad_chunked() {
+    const REQUEST: &[u8] = b"POST test.example HTTP/1.1\r\n\
+                             Transfer-Encoding: chunked\r\n\
+                             \r\n";
+
+    let e = Message::read_http(&mut BufReader::new(REQUEST)).unwrap_err();
+    assert!(matches!(e, Error::Truncated));
 }
