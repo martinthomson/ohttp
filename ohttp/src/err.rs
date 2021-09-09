@@ -1,9 +1,20 @@
 #[derive(Debug)]
 pub enum Error {
+    /// A problem occurred with the AEAD.
+    #[cfg(feature = "rust-hpke")]
+    Aead(aead::Error),
     /// A problem occurred during cryptographic processing.
+    #[cfg(feature = "nss")]
     Crypto(crate::nss::Error),
     /// An error was found in the format.
     Format,
+    /// A problem occurred with HPKE.
+    #[cfg(feature = "rust-hpke")]
+    Hpke(::hpke::HpkeError),
+    /// An internal error occurred.
+    Internal,
+    /// The wrong type of key was provided for the selected KEM.
+    InvalidKeyType,
     /// The wrong KEM was specified.
     InvalidKem,
     /// An IO error.
@@ -17,8 +28,9 @@ pub enum Error {
 }
 
 macro_rules! forward_errors {
-    {$($t:path => $v:ident),* $(,)?} => {
+    {$($(#[$m:meta])* $t:path => $v:ident),* $(,)?} => {
         $(
+            $(#[$m])*
             impl From<$t> for Error {
                 fn from(e: $t) -> Self {
                     Self::$v(e)
@@ -29,7 +41,7 @@ macro_rules! forward_errors {
         impl std::error::Error for Error {
             fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
                 match self {
-                    $( Self::$v(e) => Some(e), )*
+                    $( $(#[$m])* Self::$v(e) => Some(e), )*
                     _ => None,
                 }
             }
@@ -38,7 +50,12 @@ macro_rules! forward_errors {
 }
 
 forward_errors! {
+    #[cfg(feature = "rust-hpke")]
+    aead::Error => Aead,
+    #[cfg(feature = "nss")]
     crate::nss::Error => Crypto,
+    #[cfg(feature = "rust-hpke")]
+    ::hpke::HpkeError => Hpke,
     std::io::Error => Io,
 }
 

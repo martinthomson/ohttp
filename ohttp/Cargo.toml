@@ -6,18 +6,27 @@ edition = "2018"
 build = "build.rs"
 
 [features]
-default = ["client", "server"]
+default = ["client", "server", "nss"]
 client = []
 server = []
+nss = []
+rust-hpke = ["hpke/x25519", "rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2"]
 
 [dependencies]
 env_logger = {version = "0.8", default-features = false}
 hex = "0.4"
 lazy_static = "1.4"
 log = {version = "0.4.0", default-features = false}
+rand = {version = "0.8", optional = true}
+hpke = {version = "0.7", optional = true, default-features = false, features = ["std"]}
+aead = {version = "0.4", optional = true, features = ["std"]}
+hkdf = {version = "0.11", optional = true}
+sha2 = {version = "0.9", optional = true}
+aes-gcm = {version = "0.9", optional = true}
+chacha20poly1305 = {version = "0.8", optional = true}
 
 [build-dependencies]
-bindgen = { version = "0.56", default-features = false, features= ["runtime"] }
+bindgen = {version = "0.56", default-features = false, features = ["runtime"]}
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.5"

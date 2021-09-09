@@ -1,39 +1,19 @@
-use super::super::hpke::Aead as AeadId;
-use super::err::{secstatus_to_res, Res};
-use super::p11::sys::{
-    self, PK11Context, PK11_AEADOp, PK11_CreateContextBySymKey, PRBool, CKA_DECRYPT, CKA_ENCRYPT,
-    CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305,
-    CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
-};
-use super::p11::{Item, SymKey};
-use log::trace;
-use std::convert::{TryFrom, TryInto};
-use std::mem;
-use std::os::raw::c_int;
+#![allow(dead_code)] // TODO: remove
+
+use super::SymKey;
+use crate::err::Res;
+use crate::hpke::Aead as AeadId;
+use aead::{AeadMut, Key, NewAead, Nonce, Payload};
+use aes_gcm::{Aes128Gcm, Aes256Gcm};
+use chacha20poly1305::ChaCha20Poly1305;
+use std::convert::TryFrom;
 
 /// All the nonces are the same length.  Exploit that.
 pub const NONCE_LEN: usize = 12;
-/// The portion of the nonce that is a counter.
-const COUNTER_LEN: usize = mem::size_of::<SequenceNumber>();
-/// The NSS API insists on us identifying the tag separately, which is awful.
-/// All of the AEAD functions here have a tag of this length, so use a fixed offset.
+const COUNTER_LEN: usize = 8;
 const TAG_LEN: usize = 16;
 
-pub type SequenceNumber = u64;
-
-/// All the lengths used by `PK11_AEADOp` are signed.  This converts to that.
-fn c_int_len<T>(l: T) -> c_int
-where
-    T: TryInto<c_int>,
-    T::Error: std::error::Error,
-{
-    l.try_into().unwrap()
-}
-
-unsafe fn destroy_aead_context(ctx: *mut PK11Context) {
-    sys::PK11_DestroyContext(ctx, PRBool::from(true))
-}
-scoped_ptr!(Context, PK11Context, destroy_aead_context);
+type SequenceNumber = u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -41,140 +21,97 @@ pub enum Mode {
     Decrypt,
 }
 
-impl Mode {
-    fn p11mode(self) -> CK_ATTRIBUTE_TYPE {
-        CK_ATTRIBUTE_TYPE::from(
-            CKA_NSS_MESSAGE
-                | match self {
-                    Self::Encrypt => CKA_ENCRYPT,
-                    Self::Decrypt => CKA_DECRYPT,
-                },
-        )
+enum AeadEngine {
+    Aes128Gcm(Aes128Gcm),
+    Aes256Gcm(Aes256Gcm),
+    ChaCha20Poly1305(ChaCha20Poly1305),
+}
+
+// Dispatch functions; this just shows how janky that this sort of abstraction can be.
+// If this grows too much, this is fairly clearly responsive to using a macro.
+impl AeadEngine {
+    fn encrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
+        let tag = match self {
+            Self::Aes128Gcm(e) => e.encrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
+            Self::Aes256Gcm(e) => e.encrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
+            Self::ChaCha20Poly1305(e) => {
+                e.encrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
+            }
+        };
+        Ok(tag)
+    }
+    fn decrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
+        let tag = match self {
+            Self::Aes128Gcm(e) => e.decrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
+            Self::Aes256Gcm(e) => e.decrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
+            Self::ChaCha20Poly1305(e) => {
+                e.decrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
+            }
+        };
+        Ok(tag)
     }
 }
 
-/// This is an AEAD instance that uses the
+/// A switch-hitting AEAD that uses a selected primitive.
 pub struct Aead {
     mode: Mode,
-    ctx: Context,
+    aead: AeadEngine,
     nonce_base: [u8; NONCE_LEN],
+    seq: SequenceNumber,
 }
 
 impl Aead {
-    fn mech(algorithm: AeadId) -> CK_MECHANISM_TYPE {
-        CK_MECHANISM_TYPE::from(match algorithm {
-            // The key size determines which AES variant is used.
-            AeadId::Aes128Gcm | AeadId::Aes256Gcm => CKM_AES_GCM,
-            AeadId::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
-        })
-    }
-
-    #[cfg(test)]
-    pub fn import_key(algorithm: AeadId, key: &[u8]) -> Res<SymKey> {
-        let slot = super::p11::Slot::internal()?;
-        let ptr = unsafe {
-            sys::PK11_ImportSymKey(
-                *slot,
-                Self::mech(algorithm),
-                sys::PK11Origin::PK11_OriginUnwrap,
-                sys::CK_ATTRIBUTE_TYPE::from(sys::CKA_ENCRYPT | sys::CKA_DECRYPT),
-                &mut super::p11::Item::wrap(key),
-                std::ptr::null_mut(),
-            )
-        };
-        SymKey::from_ptr(ptr)
-    }
-
     pub fn new(
         mode: Mode,
         algorithm: AeadId,
         key: &SymKey,
         nonce_base: [u8; NONCE_LEN],
     ) -> Res<Self> {
-        trace!(
-            "New AEAD: key={} nonce_base={}",
-            hex::encode(key.key_data()?),
-            hex::encode(&nonce_base)
-        );
-
-        let ptr = unsafe {
-            PK11_CreateContextBySymKey(
-                Self::mech(algorithm),
-                mode.p11mode(),
-                **key,
-                &Item::wrap(&nonce_base[..]),
-            )
+        let aead = match algorithm {
+            AeadId::Aes128Gcm => {
+                AeadEngine::Aes128Gcm(Aes128Gcm::new(Key::<Aes128Gcm>::from_slice(key.as_ref())))
+            }
+            AeadId::Aes256Gcm => {
+                AeadEngine::Aes256Gcm(Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_ref())))
+            }
+            AeadId::ChaCha20Poly1305 => AeadEngine::ChaCha20Poly1305(ChaCha20Poly1305::new(
+                Key::<ChaCha20Poly1305>::from_slice(key.as_ref()),
+            )),
         };
         Ok(Self {
             mode,
-            ctx: Context::from_ptr(ptr)?,
+            aead,
             nonce_base,
+            seq: 0,
         })
+    }
+
+    #[cfg(test)]
+    fn import_key(_alg: AeadId, k: &[u8]) -> Res<SymKey> {
+        Ok(SymKey::from(k))
+    }
+
+    fn nonce(&self, seq: SequenceNumber) -> Vec<u8> {
+        let mut nonce = Vec::from(self.nonce_base);
+        for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
+            *n ^= u8::try_from((seq >> (8 * i)) & 0xff).unwrap();
+        }
+        nonce
     }
 
     pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Encrypt);
         // A copy for the nonce generator to write into.  But we don't use the value.
-        let mut nonce = self.nonce_base;
-        // Ciphertext with enough space for the tag.
-        // Even though we give the operation a separate buffer for the tag,
-        // reserve the capacity on allocation.
-        let mut ct = vec![0; pt.len() + TAG_LEN];
-        let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
-        secstatus_to_res(unsafe {
-            PK11_AEADOp(
-                *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
-                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
-                nonce.as_mut_ptr(),
-                c_int_len(nonce.len()),
-                aad.as_ptr(),
-                c_int_len(aad.len()),
-                ct.as_mut_ptr(),
-                &mut ct_len,
-                c_int_len(ct.len()), // signed :(
-                tag.as_mut_ptr(),
-                c_int_len(tag.len()),
-                pt.as_ptr(),
-                c_int_len(pt.len()),
-            )
-        })?;
-        ct.truncate(usize::try_from(ct_len).unwrap());
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
+        let nonce = self.nonce(self.seq);
+        self.seq += 1;
+        let ct = self.aead.encrypt(&nonce, Payload { msg: pt, aad })?;
         Ok(ct)
     }
 
     pub fn open(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
-        let mut nonce = self.nonce_base;
-        for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
-            *n ^= u8::try_from((seq >> (8 * i)) & 0xff).unwrap();
-        }
-        let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
-        let mut pt_len: c_int = 0;
-        secstatus_to_res(unsafe {
-            PK11_AEADOp(
-                *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_NO_GENERATE),
-                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
-                nonce.as_mut_ptr(),
-                c_int_len(nonce.len()),
-                aad.as_ptr(),
-                c_int_len(aad.len()),
-                pt.as_mut_ptr(),
-                &mut pt_len,
-                c_int_len(pt.len()),                           // signed :(
-                ct.as_ptr().add(ct.len() - TAG_LEN) as *mut _, // const cast :(
-                c_int_len(TAG_LEN),
-                ct.as_ptr(),
-                c_int_len(ct.len() - TAG_LEN),
-            )
-        })?;
-        let len = usize::try_from(pt_len).unwrap();
-        debug_assert_eq!(len, ct.len() - TAG_LEN);
-        pt.truncate(len);
+        let nonce = self.nonce(seq);
+        let pt = self.aead.decrypt(&nonce, Payload { msg: ct, aad })?;
         Ok(pt)
     }
 }
@@ -182,7 +119,7 @@ impl Aead {
 #[cfg(test)]
 mod test {
     use super::super::super::hpke::Aead as AeadId;
-    use super::super::init;
+    use super::super::super::init;
     use super::{Aead, Mode, SequenceNumber, NONCE_LEN};
 
     /// Check that the first invocation of encryption matches expected values.

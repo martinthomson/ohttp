@@ -3,22 +3,42 @@
 
 mod err;
 pub mod hpke;
+#[cfg(feature = "nss")]
 mod nss;
+#[cfg(feature = "rust-hpke")]
+mod rand;
+#[cfg(feature = "rust-hpke")]
+mod rh;
 mod rw;
 
 pub use err::Error;
 
+use crate::hpke::{Aead as AeadId, Kdf, Kem};
 use err::Res;
-use hpke::{Aead as AeadId, Kdf, Kem};
-use nss::aead::{Aead, Mode, NONCE_LEN};
-use nss::hkdf::{Hkdf, KeyMechanism};
-use nss::hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS};
-use nss::{random, PrivateKey, PublicKey};
 use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::io::{BufReader, Read};
 use std::mem::size_of;
+
+#[cfg(feature = "nss")]
+use nss::{
+    aead::{Aead, Mode, NONCE_LEN},
+    hkdf::{Hkdf, KeyMechanism},
+    hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS},
+    random, PrivateKey, PublicKey,
+};
+
+#[cfg(feature = "rust-hpke")]
+use crate::rand::random;
+#[cfg(feature = "rust-hpke")]
+use rh::{
+    aead::{Aead, Mode, NONCE_LEN},
+    hkdf::{Hkdf, KeyMechanism},
+    hpke::{
+        generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS, PrivateKey, PublicKey,
+    },
+};
 
 const INFO_REQUEST: &[u8] = b"request";
 const LABEL_RESPONSE: &[u8] = b"response";
@@ -29,6 +49,7 @@ const INFO_NONCE: &[u8] = b"nonce";
 pub type KeyId = u8;
 
 pub fn init() {
+    #[cfg(feature = "nss")]
     nss::init();
     let _ = env_logger::try_init();
 }
@@ -371,7 +392,7 @@ impl ClientResponse {
     /// Consume this object by decapsulating a response.
     pub fn decapsulate(self, enc_response: &[u8]) -> Res<Vec<u8>> {
         let (response_nonce, ct) = enc_response.split_at(entropy(self.hpke.config()));
-        let aead = make_aead(
+        let mut aead = make_aead(
             Mode::Decrypt,
             self.hpke.config(),
             &self.hpke,
