@@ -5,8 +5,8 @@ env:
   RUSTFLAGS: -C link-arg=-fuse-ld=lld
 
 jobs:
-  build_and_test:
-    name: Continuous Integration
+  check_nss:
+    name: NSS Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -73,3 +73,39 @@ jobs:
           args: --tests -- -D warnings
         env:
           NSS_DIR: ${{ github.workspace }}/nss
+
+  check_rust_hpke:
+    name: rust-hpke Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - uses: actions-rs/cargo@v1
+        name: Build
+        with:
+          command: build
+          args: --tests --no-default-features --features rust-hpke
+
+      - uses: actions-rs/cargo@v1
+        name: Run Tests
+        with:
+          command: test
+          args: --no-default-features --features rust-hpke
+
+      - uses: actions-rs/cargo@v1
+        name: Check formatting
+        if: ${{ success() || failure() }}
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - uses: actions-rs/cargo@v1
+        name: Clippy
+        if: ${{ success() || failure() }}
+        with:
+          command: clippy
+          args: --tests --no-default-features --features rust-hpke -- -D warnings

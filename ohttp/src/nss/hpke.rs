@@ -1,7 +1,7 @@
 use super::super::hpke::{Aead, Kdf, Kem};
-use super::err::{sec::SEC_ERROR_INVALID_ARGS, Error, Res};
+use super::err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error};
 use super::p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey};
-use super::secstatus_to_res;
+use crate::err::Res;
 use log::{log_enabled, trace};
 use std::convert::TryFrom;
 use std::ops::Deref;

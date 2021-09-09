@@ -37,6 +37,12 @@ fi
 if ! cargo clippy --tests; then
     exit 1
 fi
+if ! cargo clippy --tests --no-default-features --features rust-hpke; then
+    exit 1
+fi
 if ! cargo test; then
+    exit 1
+fi
+if ! cargo test --no-default-features --features rust-hpke; then
     exit 1
 fi

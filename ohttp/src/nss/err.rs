@@ -11,6 +11,7 @@
 )]
 
 use super::{SECStatus, SECSuccess};
+use crate::err::Res;
 use std::os::raw::c_char;
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
@@ -22,8 +23,6 @@ pub use codes::SECErrorCodes as sec;
 pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
 }
-
-pub type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
@@ -39,8 +38,8 @@ impl Error {
     }
 
     /// Get the last error, as returned by `PR_GetError()`.
-    pub(crate) fn last() -> Self {
-        Self::from(unsafe { PR_GetError() })
+    pub(crate) fn last() -> crate::Error {
+        crate::Error::from(Self::from(unsafe { PR_GetError() }))
     }
 }
 
@@ -86,14 +85,10 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     }
 }
 
-pub fn is_blocked(result: &Res<()>) -> bool {
-    matches!(result, Err(Error { code, .. }) if *code == nspr::PR_WOULD_BLOCK_ERROR)
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::{init, SECFailure, SECSuccess};
-    use super::{is_blocked, secstatus_to_res, PRErrorCode, PR_SetError};
+    use super::{secstatus_to_res, PRErrorCode, PR_SetError};
 
     fn set_error_code(code: PRErrorCode) {
         // This code doesn't work without initializing NSS first.
@@ -118,10 +113,13 @@ mod tests {
         set_error_code(super::sec::SEC_ERROR_BAD_DATABASE);
         let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
-        let e = r.unwrap_err();
-        assert_eq!(e.name, "SEC_ERROR_BAD_DATABASE");
-        assert_eq!(e.code, 18 - 0x2000);
-        assert_eq!(e.desc, "security library: bad database.");
+        if let crate::Error::Crypto(e) = r.unwrap_err() {
+            assert_eq!(e.name, "SEC_ERROR_BAD_DATABASE");
+            assert_eq!(e.code, 18 - 0x2000);
+            assert_eq!(e.desc, "security library: bad database.");
+        } else {
+            panic!();
+        }
     }
 
     #[test]
@@ -129,20 +127,11 @@ mod tests {
         set_error_code(0);
         let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
-        let e = r.unwrap_err();
-        assert_eq!(e.name, "UNKNOWN_ERROR");
-        assert_eq!(e.code, 0);
-    }
-
-    #[test]
-    fn blocked() {
-        set_error_code(super::nspr::PR_WOULD_BLOCK_ERROR);
-        let r = secstatus_to_res(SECFailure);
-        assert!(r.is_err());
-        assert!(is_blocked(&r));
-        let e = r.unwrap_err();
-        assert_eq!(e.name, "PR_WOULD_BLOCK_ERROR");
-        assert_eq!(e.code, -5998);
-        assert_eq!(e.desc, "The operation would have blocked");
+        if let crate::Error::Crypto(e) = r.unwrap_err() {
+            assert_eq!(e.name, "UNKNOWN_ERROR");
+            assert_eq!(e.code, 0);
+        } else {
+            panic!();
+        }
     }
 }

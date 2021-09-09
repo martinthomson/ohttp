@@ -22,9 +22,9 @@ pub enum Mode {
 }
 
 enum AeadEngine {
-    Aes128Gcm(Aes128Gcm),
-    Aes256Gcm(Aes256Gcm),
-    ChaCha20Poly1305(ChaCha20Poly1305),
+    Aes128Gcm(Box<Aes128Gcm>),
+    Aes256Gcm(Box<Aes256Gcm>),
+    ChaCha20Poly1305(Box<ChaCha20Poly1305>),
 }
 
 // Dispatch functions; this just shows how janky that this sort of abstraction can be.
@@ -61,6 +61,7 @@ pub struct Aead {
 }
 
 impl Aead {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn new(
         mode: Mode,
         algorithm: AeadId,
@@ -68,14 +69,14 @@ impl Aead {
         nonce_base: [u8; NONCE_LEN],
     ) -> Res<Self> {
         let aead = match algorithm {
-            AeadId::Aes128Gcm => {
-                AeadEngine::Aes128Gcm(Aes128Gcm::new(Key::<Aes128Gcm>::from_slice(key.as_ref())))
-            }
-            AeadId::Aes256Gcm => {
-                AeadEngine::Aes256Gcm(Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_ref())))
-            }
-            AeadId::ChaCha20Poly1305 => AeadEngine::ChaCha20Poly1305(ChaCha20Poly1305::new(
-                Key::<ChaCha20Poly1305>::from_slice(key.as_ref()),
+            AeadId::Aes128Gcm => AeadEngine::Aes128Gcm(Box::new(Aes128Gcm::new(
+                Key::<Aes128Gcm>::from_slice(key.as_ref()),
+            ))),
+            AeadId::Aes256Gcm => AeadEngine::Aes256Gcm(Box::new(Aes256Gcm::new(
+                Key::<Aes256Gcm>::from_slice(key.as_ref()),
+            ))),
+            AeadId::ChaCha20Poly1305 => AeadEngine::ChaCha20Poly1305(Box::new(
+                ChaCha20Poly1305::new(Key::<ChaCha20Poly1305>::from_slice(key.as_ref())),
             )),
         };
         Ok(Self {
@@ -87,6 +88,7 @@ impl Aead {
     }
 
     #[cfg(test)]
+    #[allow(clippy::unnecessary_wraps)]
     fn import_key(_alg: AeadId, k: &[u8]) -> Res<SymKey> {
         Ok(SymKey::from(k))
     }

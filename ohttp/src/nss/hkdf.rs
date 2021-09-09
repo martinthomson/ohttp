@@ -1,11 +1,11 @@
 use super::super::hpke::{Aead, Kdf};
-use super::err::Res;
 use super::p11::sys::{
     self, CKA_DERIVE, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_AES_GCM, CKM_CHACHA20_POLY1305,
     CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_SHA256, CK_BBOOL, CK_HKDF_PARAMS, CK_INVALID_HANDLE,
     CK_MECHANISM_TYPE, CK_OBJECT_HANDLE, CK_ULONG,
 };
 use super::p11::{ParamItem, SymKey};
+use crate::err::Res;
 use log::trace;
 use std::convert::TryFrom;
 use std::os::raw::c_int;

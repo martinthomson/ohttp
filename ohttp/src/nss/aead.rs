@@ -1,11 +1,12 @@
-use super::super::hpke::Aead as AeadId;
-use super::err::{secstatus_to_res, Res};
+use super::err::secstatus_to_res;
 use super::p11::sys::{
     self, PK11Context, PK11_AEADOp, PK11_CreateContextBySymKey, PRBool, CKA_DECRYPT, CKA_ENCRYPT,
     CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305,
     CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
 };
 use super::p11::{Item, SymKey};
+use crate::err::Res;
+use crate::hpke::Aead as AeadId;
 use log::trace;
 use std::convert::{TryFrom, TryInto};
 use std::mem;

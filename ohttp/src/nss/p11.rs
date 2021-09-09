@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::err::{secstatus_to_res, Error, Res};
-
+use super::err::{secstatus_to_res, Error};
+use crate::err::Res;
 use std::boxed::Box;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
@@ -42,7 +42,7 @@ macro_rules! scoped_ptr {
         }
 
         impl $scoped {
-            pub fn from_ptr(ptr: *mut $target) -> Result<Self, crate::nss::err::Error> {
+            pub fn from_ptr(ptr: *mut $target) -> Result<Self, crate::err::Error> {
                 if ptr.is_null() {
                     Err(crate::nss::err::Error::last())
                 } else {

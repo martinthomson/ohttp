@@ -1,5 +1,9 @@
 #![deny(warnings, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
+#![cfg_attr(
+    not(all(feature = "client", feature = "server")),
+    allow(dead_code, unused_imports)
+)]
 
 mod err;
 pub mod hpke;
@@ -22,11 +26,13 @@ use std::io::{BufReader, Read};
 use std::mem::size_of;
 
 #[cfg(feature = "nss")]
+use nss::random;
+#[cfg(feature = "nss")]
 use nss::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS},
-    random, PrivateKey, PublicKey,
+    PrivateKey, PublicKey,
 };
 
 #[cfg(feature = "rust-hpke")]
@@ -214,6 +220,7 @@ pub struct ClientRequest {
     hpke: HpkeS,
 }
 
+#[cfg(feature = "client")]
 impl ClientRequest {
     /// Reads an encoded configuration and constructs a single use client sender.
     /// See `KeyConfig::encode` for the structure details.
@@ -263,6 +270,7 @@ pub struct Server {
     config: KeyConfig,
 }
 
+#[cfg(feature = "server")]
 impl Server {
     /// Create a new server configuration.
     /// # Panics
@@ -343,7 +351,7 @@ fn make_aead(
     let iv = hkdf.expand_data(&prk, INFO_NONCE, cfg.aead().n_n())?;
     let nonce_base = <[u8; NONCE_LEN]>::try_from(iv).unwrap();
 
-    Ok(Aead::new(mode, cfg.aead(), &key, nonce_base)?)
+    Aead::new(mode, cfg.aead(), &key, nonce_base)
 }
 
 /// An object for encapsulating responses.
@@ -354,6 +362,7 @@ pub struct ServerResponse {
     aead: Aead,
 }
 
+#[cfg(feature = "server")]
 impl ServerResponse {
     fn new(hpke: &HpkeR, enc: Vec<u8>) -> Res<Self> {
         let response_nonce = random(entropy(hpke.config()));
@@ -381,6 +390,7 @@ pub struct ClientResponse {
     enc: Vec<u8>,
 }
 
+#[cfg(feature = "client")]
 impl ClientResponse {
     /// Private method for constructing one of these.
     /// Doesn't do anything because we don't have the nonce yet, so
@@ -399,7 +409,7 @@ impl ClientResponse {
             self.enc,
             response_nonce,
         )?;
-        Ok(aead.open(&[], 0, ct)?) // 0 is the sequence number
+        aead.open(&[], 0, ct) // 0 is the sequence number
     }
 }
 

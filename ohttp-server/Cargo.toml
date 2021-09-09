@@ -4,8 +4,12 @@ version = "0.1.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 
+[features]
+default = ["nss"]
+nss = ["ohttp/nss"]
+rust-hpke = ["ohttp/rust-hpke"]
+
 [dependencies]
-# bytes = "1.0"
 hex = "0.4"
 structopt = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -17,4 +21,5 @@ features = ["bhttp", "write-http"]
 
 [dependencies.ohttp]
 path= "../ohttp"
-features = ["client"]
+features = ["server"]
+default-features = false
