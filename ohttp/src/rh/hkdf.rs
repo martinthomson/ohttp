@@ -39,10 +39,12 @@ impl Hkdf {
     }
 
     #[cfg(test)]
+    #[allow(clippy::unnecessary_wraps)]
     pub fn import_ikm(ikm: &[u8]) -> Res<SymKey> {
         Ok(SymKey::from(ikm))
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     pub fn extract(&self, salt: &[u8], ikm: &SymKey) -> Res<SymKey> {
         let prk = match self {
             Self::Sha256 => {

@@ -102,7 +102,7 @@ impl FieldSection {
     }
 
     pub fn put(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
-        self.0.push(Field::new(name.into(), value.into()))
+        self.0.push(Field::new(name.into(), value.into()));
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Field> {
@@ -658,7 +658,7 @@ impl Message {
         self.control.write_http(w)?;
         if !self.content.is_empty() {
             if self.trailer.is_empty() {
-                write!(w, "Content-Length: {}\r\n", self.content.len())?
+                write!(w, "Content-Length: {}\r\n", self.content.len())?;
             } else {
                 w.write_all(b"Transfer-Encoding: chunked\r\n")?;
             }

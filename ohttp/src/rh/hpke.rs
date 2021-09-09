@@ -62,6 +62,7 @@ pub enum PublicKey {
 }
 
 impl PublicKey {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn key_data(&self) -> Res<Vec<u8>> {
         Ok(match self {
             Self::X25519(k) => Vec::from(k.to_bytes().as_slice()),
@@ -84,6 +85,7 @@ pub enum PrivateKey {
 }
 
 impl PrivateKey {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn key_data(&self) -> Res<Vec<u8>> {
         Ok(match self {
             Self::X25519(k) => Vec::from(k.to_bytes().as_slice()),
@@ -239,6 +241,7 @@ impl HpkeS {
     }
 
     /// Get the encapsulated KEM secret.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn enc(&self) -> Res<Vec<u8>> {
         Ok(self.enc.clone())
     }
@@ -428,6 +431,7 @@ impl Deref for HpkeR {
 }
 
 /// Generate a key pair for the identified KEM.
+#[allow(clippy::unnecessary_wraps)]
 pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
     let mut csprng = thread_rng();
     let (sk, pk) = match kem {

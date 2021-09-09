@@ -13,6 +13,7 @@ use crate::err::Res;
 pub struct SymKey(Vec<u8>);
 
 impl SymKey {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn key_data(&self) -> Res<&[u8]> {
         Ok(&self.0)
     }

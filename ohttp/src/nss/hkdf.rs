@@ -124,7 +124,7 @@ impl Hkdf {
             sys::PK11_Derive(
                 **prk,
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
-                self.expand_params(&info).ptr(),
+                self.expand_params(info).ptr(),
                 key_mech.mech(),
                 CK_MECHANISM_TYPE::from(CKA_DERIVE),
                 c_int::try_from(key_mech.len()).unwrap(),
@@ -145,7 +145,7 @@ impl Hkdf {
             sys::PK11_Derive(
                 **prk,
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
-                self.expand_params(&info).ptr(),
+                self.expand_params(info).ptr(),
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
                 CK_MECHANISM_TYPE::from(CKA_DERIVE),
                 c_int::try_from(len).unwrap(),

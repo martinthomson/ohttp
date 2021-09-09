@@ -32,7 +32,7 @@ where
 }
 
 unsafe fn destroy_aead_context(ctx: *mut PK11Context) {
-    sys::PK11_DestroyContext(ctx, PRBool::from(true))
+    sys::PK11_DestroyContext(ctx, PRBool::from(true));
 }
 scoped_ptr!(Context, PK11Context, destroy_aead_context);
 
