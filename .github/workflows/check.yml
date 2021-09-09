@@ -2,12 +2,15 @@ name: CI
 on: [push, pull_request]
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld
 
 jobs:
   check_nss:
     name: NSS Build
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+      NSS_DIR: ${{ github.workspace }}/nss
+
     steps:
       - uses: actions/checkout@v2
 
@@ -39,23 +42,20 @@ jobs:
 
       - name: Fetch NSS and NSPR
         run: |
-          hg clone https://hg.mozilla.org/projects/nspr ./nspr
-          git clone --depth 1 https://github.com/nss-dev/nss ./nss
+          hg clone https://hg.mozilla.org/projects/nspr "$NSS_DIR"/../nspr
+          git clone --depth 1 https://github.com/nss-dev/nss "$NSS_DIR"
 
       - uses: actions-rs/cargo@v1
         name: Build
         with:
           command: build
           args: --tests
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
 
       - uses: actions-rs/cargo@v1
         name: Run Tests
         with:
           command: test
         env:
-          NSS_DIR: ${{ github.workspace }}/nss
           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
 
       - uses: actions-rs/cargo@v1
@@ -71,8 +71,6 @@ jobs:
         with:
           command: clippy
           args: --tests -- -D warnings
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
 
   check_rust_hpke:
     name: rust-hpke Build
