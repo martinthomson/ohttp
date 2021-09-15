@@ -116,21 +116,26 @@ impl KeyConfig {
         })
     }
 
-    /// Derive a configuration for the server side from input keying material
+    /// Derive a configuration for the server side from input keying material,
+    /// using the DeriveKeyPair functionality of the HPKE KEM defined here:
+    /// https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4
     /// # Panics
     /// If the configurations don't include a supported configuration.
-    #[cfg(feature = "rust-hpke")]
     pub fn derive(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>, ikm: &[u8]) -> Res<Self> {
-        Self::strip_unsupported(&mut symmetric, kem);
-        assert!(!symmetric.is_empty());
-        let (sk, pk) = derive_key_pair(kem, ikm)?;
-        Ok(Self {
-            key_id,
-            kem,
-            symmetric,
-            sk: Some(sk),
-            pk,
-        })
+        if cfg!(feature = "rust-hpke") {
+            Self::strip_unsupported(&mut symmetric, kem);
+            assert!(!symmetric.is_empty());
+            let (sk, pk) = derive_key_pair(kem, ikm)?;
+            Ok(Self {
+                key_id,
+                kem,
+                symmetric,
+                sk: Some(sk),
+                pk,
+            })
+        } else {
+            Err(Error::Unsupported)
+        }
     }
 
     /// Encode into a wire format.  This shares a format with the core of ECH:
@@ -512,14 +517,16 @@ mod test {
     fn derive_key_pair() {
         crate::init();
 
-        let server_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
-        let mut server = Server::new(server_config).unwrap();
-        let encoded_config_1 = server.config().encode().unwrap();
+        let expected_config = hex::decode("010020fc0138936410311a0c641a5ca086391de8e70382333f6d64492521ad7dc78a5d00080001000100010003").unwrap();
+        let config = KeyConfig::parse(&expected_config).unwrap();
 
-        let server_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
-        server = Server::new(server_config).unwrap();
-        let encoded_config_2 = server.config().encode().unwrap();
+        let new_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
+        assert_eq!(config.key_id, new_config.key_id);
+        assert_eq!(config.kem, new_config.kem);
+        assert_eq!(config.symmetric, new_config.symmetric);
 
-        assert_eq!(encoded_config_1, encoded_config_2);
+        let server = Server::new(new_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        assert_eq!(expected_config, encoded_config);
     }
 }
