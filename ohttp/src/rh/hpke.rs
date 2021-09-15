@@ -444,6 +444,18 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
     Ok((sk, pk))
 }
 
+#[allow(clippy::unnecessary_wraps)]
+pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
+    let (sk, pk) = match kem {
+        Kem::X25519Sha256 => {
+            let (sk, pk) = X25519HkdfSha256::derive_keypair(ikm);
+            (PrivateKey::X25519(sk), PublicKey::X25519(pk))
+        }
+    };
+    trace!("Derived key pair: sk={:?} pk={:?}", sk, pk);
+    Ok((sk, pk))
+}
+
 #[cfg(test)]
 mod test {
     use super::{generate_key_pair, Config, HpkeR, HpkeS};

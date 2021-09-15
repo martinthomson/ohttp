@@ -42,7 +42,7 @@ use rh::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{
-        generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS, PrivateKey, PublicKey,
+        generate_key_pair, derive_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS, PrivateKey, PublicKey,
     },
 };
 
@@ -107,6 +107,23 @@ impl KeyConfig {
         Self::strip_unsupported(&mut symmetric, kem);
         assert!(!symmetric.is_empty());
         let (sk, pk) = generate_key_pair(kem)?;
+        Ok(Self {
+            key_id,
+            kem,
+            symmetric,
+            sk: Some(sk),
+            pk,
+        })
+    }
+
+    /// Derive a configuration for the server side from input keying material
+    /// # Panics
+    /// If the configurations don't include a supported configuration.
+    #[cfg(feature = "rust-hpke")]
+    pub fn derive(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>, ikm: &[u8]) -> Res<Self> {
+        Self::strip_unsupported(&mut symmetric, kem);
+        assert!(!symmetric.is_empty());
+        let (sk, pk) = derive_key_pair(kem, ikm)?;
         Ok(Self {
             key_id,
             kem,
@@ -425,6 +442,10 @@ mod test {
         SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm),
         SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305),
     ];
+    const IKM: &[u8] = &[
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18
+    ];
 
     const REQUEST: &[u8] = &[
         0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78, 0x61,
@@ -484,5 +505,21 @@ mod test {
         assert_eq!(&response1[..], RESPONSE);
         let response2 = client_response2.decapsulate(&enc_response2).unwrap();
         assert_eq!(&response2[..], RESPONSE);
+    }
+
+    #[cfg(feature = "rust-hpke")]
+    #[test]
+    fn derive_key_pair() {
+        crate::init();
+
+        let server_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
+        let mut server = Server::new(server_config).unwrap();
+        let encoded_config_1 = server.config().encode().unwrap();
+
+        let server_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
+        server = Server::new(server_config).unwrap();
+        let encoded_config_2 = server.config().encode().unwrap();
+
+        assert_eq!(encoded_config_1, encoded_config_2);
     }
 }
