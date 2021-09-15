@@ -122,6 +122,7 @@ impl KeyConfig {
     /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4>
     /// # Panics
     /// If the configurations don't include a supported configuration.
+    #[allow(unused)]
     pub fn derive(
         key_id: u8,
         kem: Kem,
