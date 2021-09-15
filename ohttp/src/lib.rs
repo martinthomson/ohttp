@@ -42,7 +42,8 @@ use rh::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{
-        generate_key_pair, derive_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS, PrivateKey, PublicKey,
+        derive_key_pair, generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS,
+        PrivateKey, PublicKey,
     },
 };
 
@@ -117,12 +118,18 @@ impl KeyConfig {
     }
 
     /// Derive a configuration for the server side from input keying material,
-    /// using the DeriveKeyPair functionality of the HPKE KEM defined here:
-    /// https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4
+    /// using the `DeriveKeyPair` functionality of the HPKE KEM defined here:
+    /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4>
     /// # Panics
     /// If the configurations don't include a supported configuration.
-    pub fn derive(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>, ikm: &[u8]) -> Res<Self> {
-        if cfg!(feature = "rust-hpke") {
+    pub fn derive(
+        key_id: u8,
+        kem: Kem,
+        mut symmetric: Vec<SymmetricSuite>,
+        ikm: &[u8],
+    ) -> Res<Self> {
+        #[cfg(feature = "rust-hpke")]
+        {
             Self::strip_unsupported(&mut symmetric, kem);
             assert!(!symmetric.is_empty());
             let (sk, pk) = derive_key_pair(kem, ikm)?;
@@ -133,7 +140,9 @@ impl KeyConfig {
                 sk: Some(sk),
                 pk,
             })
-        } else {
+        }
+        #[cfg(not(feature = "rust-hpke"))]
+        {
             Err(Error::Unsupported)
         }
     }
@@ -449,7 +458,7 @@ mod test {
     ];
     const IKM: &[u8] = &[
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
     ];
 
     const REQUEST: &[u8] = &[
