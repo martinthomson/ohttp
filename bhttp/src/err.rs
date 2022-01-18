@@ -27,7 +27,7 @@ pub enum Error {
 }
 
 macro_rules! forward_errors {
-    {$($t:path => $v:ident),* $(,)?} => {
+    {$($(#[$a:meta])* $t:path => $v:ident),* $(,)?} => {
         $(
             impl From<$t> for Error {
                 fn from(e: $t) -> Self {
@@ -39,7 +39,7 @@ macro_rules! forward_errors {
         impl std::error::Error for Error {
             fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
                 match self {
-                    $( Self::$v(e) => Some(e), )*
+                    $( $(#[$a])* Self::$v(e) => Some(e), )*
                     _ => None,
                 }
             }
