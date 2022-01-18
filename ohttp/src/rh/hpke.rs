@@ -106,8 +106,8 @@ impl std::fmt::Debug for PrivateKey {
 // TODO: Use macros here.  To do that, we needs concat_ident!(), but it's not ready.
 // This is what a macro that uses concat_ident!() might produce, written out in full.
 enum SenderContextX25519HkdfSha256HkdfSha256 {
-    AesGcm128(AeadCtxS<AesGcm128, HkdfSha256, X25519HkdfSha256>),
-    ChaCha20Poly1305(AeadCtxS<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>),
+    AesGcm128(Box<AeadCtxS<AesGcm128, HkdfSha256, X25519HkdfSha256>>),
+    ChaCha20Poly1305(Box<AeadCtxS<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>>),
 }
 
 enum SenderContextX25519HkdfSha256 {
@@ -201,7 +201,7 @@ impl HpkeS {
                                 info,
                                 $csprng,
                             )?;
-                            ($ctxt1($ctxt2($ctxt3(context))), enc)
+                            ($ctxt1($ctxt2($ctxt3(Box::new(context)))), enc)
                         }
                     )*
                     _ => return Err(Error::InvalidKeyType),
@@ -270,8 +270,8 @@ impl Deref for HpkeS {
 }
 
 enum ReceiverContextX25519HkdfSha256HkdfSha256 {
-    AesGcm128(AeadCtxR<AesGcm128, HkdfSha256, X25519HkdfSha256>),
-    ChaCha20Poly1305(AeadCtxR<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>),
+    AesGcm128(Box<AeadCtxR<AesGcm128, HkdfSha256, X25519HkdfSha256>>),
+    ChaCha20Poly1305(Box<AeadCtxR<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>>),
 }
 
 enum ReceiverContextX25519HkdfSha256 {
@@ -365,7 +365,7 @@ impl HpkeR {
                                 &enc,
                                 info,
                             )?;
-                            $ctxt1($ctxt2($ctxt3(context)))
+                            $ctxt1($ctxt2($ctxt3(Box::new(context))))
                         }
                     )*
                     _ => return Err(Error::InvalidKeyType),

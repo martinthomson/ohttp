@@ -295,16 +295,19 @@ mod nss {
             .stdout;
         let modversion_str = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
         let mut v = modversion_str.split('.');
-        if v.next() != Some("3") {
-            panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
-        }
+        assert_eq!(
+            v.next(),
+            Some("3"),
+            "NSS version 3.62 or higher is needed (or set $NSS_DIR)"
+        );
         if let Some(minor) = v.next() {
             let minor = minor
                 .parse::<u32>()
                 .expect("NSS minor version is not a number");
-            if minor < 62 {
-                panic!("NSS version 3.62 or higher is needed (or set $NSS_DIR)");
-            }
+            assert!(
+                minor >= 62,
+                "NSS version 3.62 or higher is needed (or set $NSS_DIR)",
+            );
         }
 
         let cfg = Command::new("pkg-config")
