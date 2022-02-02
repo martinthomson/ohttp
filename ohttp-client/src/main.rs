@@ -89,16 +89,20 @@ async fn main() -> Res<()> {
     let (enc_request, ohttp_res) = ohttp_req.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 
-    let mut tls_config = rustls::ClientConfig::new();
-    if let Some(pem) = &args.trust {
-        tls_config
-            .root_store
-            .add_pem_file(&mut io::BufReader::new(File::open(pem)?))
-            .expect("Trust store read failed");
-    }
-    let client = reqwest::ClientBuilder::new()
-        .use_preconfigured_tls(tls_config)
-        .build()?;
+    let client = match &args.trust {
+        Some(pem) => {
+            let mut tls_config = rustls::ClientConfig::new();
+            tls_config
+                .root_store
+                .add_pem_file(&mut io::BufReader::new(File::open(pem)?))
+                .expect("Trust store read failed");
+            reqwest::ClientBuilder::new()
+                .use_preconfigured_tls(tls_config)
+                .build()?
+        }
+        None => reqwest::ClientBuilder::new().build()?,
+    };
+
     let enc_response = client
         .post(&args.url)
         .header("content-type", "message/ohttp-req")
