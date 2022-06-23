@@ -6,7 +6,7 @@ use log::{log_enabled, trace};
 use std::convert::TryFrom;
 use std::ops::Deref;
 use std::os::raw::c_uint;
-use std::ptr::{null, null_mut};
+use std::ptr::{addr_of_mut, null, null_mut};
 
 pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
 
@@ -106,16 +106,11 @@ pub struct HpkeS {
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
     #[allow(clippy::similar_names)]
-    pub fn new(
-        config: Config,
-        pk_e: &PublicKey,
-        sk_e: &mut PrivateKey,
-        pk_r: &mut PublicKey,
-        info: &[u8],
-    ) -> Res<Self> {
+    pub fn new(config: Config, pk_r: &mut PublicKey, info: &[u8]) -> Res<Self> {
+        let (sk_e, pk_e) = generate_key_pair(config.kem)?;
         let context = HpkeContext::new(config)?;
         secstatus_to_res(unsafe {
-            sys::PK11_HPKE_SetupS(*context, **pk_e, **sk_e, **pk_r, &Item::wrap(info))
+            sys::PK11_HPKE_SetupS(*context, *pk_e, *sk_e, **pk_r, &Item::wrap(info))
         })?;
         Ok(Self { context, config })
     }
@@ -246,6 +241,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
     params.extend_from_slice(oid_slc);
 
     let mut public_ptr: *mut sys::SECKEYPublicKey = null_mut();
+    let mut wrapped = Item::wrap(&params);
 
     // Try to make an insensitive key so that we can read the key data for tracing.
     let insensitive_secret_ptr = if log_enabled!(log::Level::Trace) {
@@ -253,7 +249,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
             sys::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
+                addr_of_mut!(wrapped).cast(),
                 &mut public_ptr,
                 sys::PK11_ATTR_SESSION | sys::PK11_ATTR_INSENSITIVE | sys::PK11_ATTR_PUBLIC,
                 sys::CK_FLAGS::from(sys::CKF_DERIVE),
@@ -270,7 +266,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
             sys::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 sys::CK_MECHANISM_TYPE::from(sys::CKM_EC_KEY_PAIR_GEN),
-                (&mut Item::wrap(&params) as *mut sys::SECItem).cast(),
+                addr_of_mut!(wrapped).cast(),
                 &mut public_ptr,
                 sys::PK11_ATTR_SESSION | sys::PK11_ATTR_SENSITIVE | sys::PK11_ATTR_PRIVATE,
                 sys::CK_FLAGS::from(sys::CKF_DERIVE),
@@ -303,9 +299,8 @@ mod test {
     fn make() {
         init();
         let cfg = Config::default();
-        let (mut sk_s, pk_s) = generate_key_pair(cfg.kem()).unwrap();
         let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
-        let hpke_s = HpkeS::new(cfg, &pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
+        let hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
         let _hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
     }
 
@@ -318,11 +313,10 @@ mod test {
             ..Config::default()
         };
         assert!(cfg.supported());
-        let (mut sk_s, pk_s) = generate_key_pair(cfg.kem()).unwrap();
         let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
-        let mut hpke_s = HpkeS::new(cfg, &pk_s, &mut sk_s, &mut pk_r, INFO).unwrap();
+        let mut hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
         let enc = hpke_s.enc().unwrap();
         let ct = hpke_s.seal(AAD, PT).unwrap();
 

@@ -260,12 +260,9 @@ impl ClientRequest {
     pub fn new(encoded_config: &[u8]) -> Res<Self> {
         let mut config = KeyConfig::parse(encoded_config)?;
 
-        let (mut sk_s, pk_s) = generate_key_pair(config.kem)?;
         let hpke = HpkeS::new(
             // TODO(mt) choose the best config, not just the first.
             config.select(config.symmetric[0])?,
-            &pk_s,
-            &mut sk_s,
             &mut config.pk,
             INFO_REQUEST,
         )?;
