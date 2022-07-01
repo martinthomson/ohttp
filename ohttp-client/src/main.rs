@@ -1,6 +1,7 @@
 use bhttp::{Message, Mode};
 use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -91,13 +92,12 @@ async fn main() -> Res<()> {
 
     let client = match &args.trust {
         Some(pem) => {
-            let mut tls_config = rustls::ClientConfig::new();
-            tls_config
-                .root_store
-                .add_pem_file(&mut io::BufReader::new(File::open(pem)?))
-                .expect("Trust store read failed");
+            let mut buf = Vec::new();
+            File::open(pem)?
+                    .read_to_end(&mut buf)?;
+            let cert = reqwest::Certificate::from_pem(buf.as_slice())?;
             reqwest::ClientBuilder::new()
-                .use_preconfigured_tls(tls_config)
+                .add_root_certificate(cert)
                 .build()?
         }
         None => reqwest::ClientBuilder::new().build()?,
