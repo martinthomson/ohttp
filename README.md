@@ -56,8 +56,8 @@ cd $workspace
 git clone https://github.com/martinthomson/ohttp ./ohttp
 git clone https://github.com/nss-dev/nss ./nss
 # or
-# hg clone https://hg.mozilla/org/projects/nss ./nss
-hg clone https://hg.mozilla/org/projects/nspr ./nspr
+# hg clone https://hg.mozilla.org/projects/nss ./nss
+hg clone https://hg.mozilla.org/projects/nspr ./nspr
 ```
 
 The build then needs to be told about where to find NSS.  The runtime also needs
