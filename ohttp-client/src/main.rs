@@ -93,8 +93,7 @@ async fn main() -> Res<()> {
     let client = match &args.trust {
         Some(pem) => {
             let mut buf = Vec::new();
-            File::open(pem)?
-                    .read_to_end(&mut buf)?;
+            File::open(pem)?.read_to_end(&mut buf)?;
             let cert = reqwest::Certificate::from_pem(buf.as_slice())?;
             reqwest::ClientBuilder::new()
                 .add_root_certificate(cert)
