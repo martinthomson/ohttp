@@ -66,6 +66,7 @@ convert_enum! {
 }
 
 impl Aead {
+    /// The size of the key for this AEAD.
     #[must_use]
     pub fn n_k(self) -> usize {
         match self {
@@ -74,10 +75,18 @@ impl Aead {
         }
     }
 
+    /// The size of the nonce for this AEAD.
     #[must_use]
     pub fn n_n(self) -> usize {
         match self {
             Aead::Aes128Gcm | Aead::Aes256Gcm | Aead::ChaCha20Poly1305 => 12,
         }
+    }
+
+    /// The size of the MAC for this AEAD.
+    #[must_use]
+    #[allow(clippy::unused_self)] // This is only presently constant.
+    pub fn n_m(self) -> usize {
+        16
     }
 }
