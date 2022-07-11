@@ -19,6 +19,7 @@ pub use err::Error;
 
 use crate::hpke::{Aead as AeadId, Kdf, Kem};
 use err::Res;
+use log::trace;
 use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
 use std::convert::TryFrom;
@@ -47,7 +48,11 @@ use rh::{
     },
 };
 
+/// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
+const REQUEST_HEADER_LEN: usize = size_of::<KeyId>() + 6;
 const INFO_REQUEST: &[u8] = b"message/bhttp request";
+/// The info used for HPKE export is `INFO_REQUEST`, a zero byte, and the header.
+const INFO_LEN: usize = INFO_REQUEST.len() + 1 + REQUEST_HEADER_LEN;
 const LABEL_RESPONSE: &[u8] = b"message/bhttp response";
 const INFO_KEY: &[u8] = b"key";
 const INFO_NONCE: &[u8] = b"nonce";
@@ -244,12 +249,25 @@ impl KeyConfig {
     }
 }
 
+/// Construct the info parameter we use to initialize an `HpkeS` instance.
+fn build_info(key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
+    let mut info = Vec::with_capacity(INFO_LEN);
+    info.extend_from_slice(INFO_REQUEST);
+    info.push(0);
+    write_uint(size_of::<KeyId>(), key_id, &mut info)?;
+    write_uint(2, u16::from(config.kem()), &mut info)?;
+    write_uint(2, u16::from(config.kdf()), &mut info)?;
+    write_uint(2, u16::from(config.aead()), &mut info)?;
+    trace!("HPKE info: {}", hex::encode(&info));
+    Ok(info)
+}
+
 /// This is the sort of information we expect to receive from the receiver.
 /// This might not be necessary if we agree on a format.
 #[cfg(feature = "client")]
 pub struct ClientRequest {
-    key_id: KeyId,
     hpke: HpkeS,
+    header: Vec<u8>,
 }
 
 #[cfg(feature = "client")]
@@ -259,34 +277,35 @@ impl ClientRequest {
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
     pub fn new(encoded_config: &[u8]) -> Res<Self> {
         let mut config = KeyConfig::parse(encoded_config)?;
+        // TODO(mt) choose the best config, not just the first.
+        let selected = config.select(config.symmetric[0])?;
 
-        let hpke = HpkeS::new(
-            // TODO(mt) choose the best config, not just the first.
-            config.select(config.symmetric[0])?,
-            &mut config.pk,
-            INFO_REQUEST,
-        )?;
+        // Build the info, which contains the message header.
+        let info = build_info(config.key_id, selected)?;
+        let hpke = HpkeS::new(selected, &mut config.pk, &info)?;
 
-        Ok(Self {
-            key_id: config.key_id,
-            hpke,
-        })
+        let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
+        debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
+        Ok(Self { hpke, header })
     }
 
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
-        // AAD is this header
-        let mut enc_request = Vec::new();
-        write_uint(size_of::<KeyId>(), self.key_id, &mut enc_request)?;
-        write_uint(2, u16::from(self.hpke.kem()), &mut enc_request)?;
-        write_uint(2, u16::from(self.hpke.kdf()), &mut enc_request)?;
-        write_uint(2, u16::from(self.hpke.aead()), &mut enc_request)?;
+        let extra =
+            self.hpke.config().kem().n_enc() + self.hpke.config().aead().n_t() + request.len();
+        let expected_len = self.header.len() + extra;
 
-        let mut ct = self.hpke.seal(&enc_request, request)?;
+        let mut enc_request = self.header;
+        enc_request.reserve_exact(extra);
+
         let enc = self.hpke.enc()?;
         enc_request.extend_from_slice(&enc);
+
+        let mut ct = self.hpke.seal(&[], request)?;
         enc_request.append(&mut ct);
+
+        debug_assert_eq!(expected_len, enc_request.len());
         Ok((enc_request, ClientResponse::new(self.hpke, enc)))
     }
 }
@@ -320,12 +339,9 @@ impl Server {
     /// Not as a consequence of this code, but Rust won't know that for sure.
     #[allow(clippy::similar_names)] // for kem_id and key_id
     pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
-        // Can't size_of() for KemId::Type and friends; the AAD covers each of these.
-        const AAD_LEN: usize = size_of::<KeyId>() + 6;
-        if enc_request.len() < AAD_LEN {
+        if enc_request.len() < REQUEST_HEADER_LEN {
             return Err(Error::Truncated);
         }
-        let aad = &enc_request[..AAD_LEN];
         let mut r = BufReader::new(enc_request);
         let key_id = u8::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
         if key_id != self.config.key_id {
@@ -339,6 +355,11 @@ impl Server {
         let aead_id = AeadId::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
         let sym = SymmetricSuite::new(kdf_id, aead_id);
 
+        let info = build_info(
+            key_id,
+            HpkeConfig::new(self.config.kem, sym.kdf(), sym.aead()),
+        )?;
+
         let cfg = self.config.select(sym)?;
         let mut enc = vec![0; cfg.kem().n_enc()];
         r.read_exact(&mut enc)?;
@@ -347,13 +368,13 @@ impl Server {
             &self.config.pk,
             self.config.sk.as_mut().unwrap(),
             &enc,
-            INFO_REQUEST,
+            &info,
         )?;
 
         let mut ct = Vec::new();
         r.read_to_end(&mut ct)?;
 
-        let request = hpke.open(aad, &ct)?;
+        let request = hpke.open(&[], &ct)?;
         Ok((request, ServerResponse::new(&hpke, enc)?))
     }
 }
