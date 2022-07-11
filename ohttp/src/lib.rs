@@ -19,6 +19,7 @@ pub use err::Error;
 
 use crate::hpke::{Aead as AeadId, Kdf, Kem};
 use err::Res;
+use log::trace;
 use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
 use std::convert::TryFrom;
@@ -257,6 +258,7 @@ fn build_info(key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
     write_uint(2, u16::from(config.kem()), &mut info)?;
     write_uint(2, u16::from(config.kdf()), &mut info)?;
     write_uint(2, u16::from(config.aead()), &mut info)?;
+    trace!("HPKE info: {}", hex::encode(&info));
     Ok(info)
 }
 
@@ -291,7 +293,7 @@ impl ClientRequest {
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
         let extra =
-            self.hpke.config().kem().n_enc() + self.hpke.config().aead().n_m() + request.len();
+            self.hpke.config().kem().n_enc() + self.hpke.config().aead().n_t() + request.len();
         let expected_len = self.header.len() + extra;
 
         let mut enc_request = self.header;

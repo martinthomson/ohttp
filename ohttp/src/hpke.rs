@@ -83,10 +83,10 @@ impl Aead {
         }
     }
 
-    /// The size of the MAC for this AEAD.
+    /// The size of the tag for this AEAD.
     #[must_use]
     #[allow(clippy::unused_self)] // This is only presently constant.
-    pub fn n_m(self) -> usize {
+    pub fn n_t(self) -> usize {
         16
     }
 }
