@@ -6,7 +6,7 @@ edition = "2018"
 build = "build.rs"
 
 [features]
-default = ["client", "server", "nss"]
+default = ["client", "server", "rust-hpke"]
 client = []
 server = []
 nss = []
