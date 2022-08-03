@@ -1,3 +1,5 @@
+#![deny(warnings, clippy::pedantic)]
+
 use bhttp::{Message, Mode};
 use ohttp::{
     hpke::{Aead, Kdf, Kem},
@@ -43,33 +45,34 @@ impl Args {
 }
 
 fn generate_reply(
-    ohttp_ref: Arc<Mutex<OhttpServer>>,
+    ohttp_ref: &Arc<Mutex<OhttpServer>>,
     enc_request: &[u8],
     mode: Mode,
 ) -> Res<Vec<u8>> {
     let mut ohttp = ohttp_ref.lock().unwrap();
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
-    let brequest = Message::read_bhttp(&mut BufReader::new(&request[..]))?;
+    let bin_request = Message::read_bhttp(&mut BufReader::new(&request[..]))?;
 
-    let mut bresponse = Message::response(200);
-    bresponse.write_content(b"Received:\r\n---8<---\r\n");
+    let mut bin_response = Message::response(200);
+    bin_response.write_content(b"Received:\r\n---8<---\r\n");
     let mut tmp = Vec::new();
-    brequest.write_http(&mut tmp)?;
-    bresponse.write_content(&tmp);
-    bresponse.write_content(b"--->8---\r\n");
+    bin_request.write_http(&mut tmp)?;
+    bin_response.write_content(&tmp);
+    bin_response.write_content(b"--->8---\r\n");
 
     let mut response = Vec::new();
-    bresponse.write_bhttp(mode, &mut response)?;
+    bin_response.write_bhttp(mode, &mut response)?;
     let enc_response = server_response.encapsulate(&response)?;
     Ok(enc_response)
 }
 
+#[allow(clippy::unused_async)]
 async fn serve(
     body: warp::hyper::body::Bytes,
     ohttp: Arc<Mutex<OhttpServer>>,
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
-    match generate_reply(ohttp, &body[..], mode) {
+    match generate_reply(&ohttp, &body[..], mode) {
         Ok(resp) => Ok(warp::http::Response::builder()
             .header("Content-Type", "message/ohttp-res")
             .body(resp)),

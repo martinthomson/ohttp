@@ -1,3 +1,5 @@
+#![deny(warnings, clippy::pedantic)]
+
 use bhttp::{Message, Mode};
 use ohttp::{init, ClientRequest};
 use std::io::{self, BufRead, Write};
@@ -37,11 +39,11 @@ fn main() {
     let mut rsp = String::new();
     input.read_line(&mut rsp).unwrap();
     let enc_response = hex::decode(rsp.trim()).unwrap();
-    let response = client_response.decapsulate(&enc_response).unwrap();
+    let dec_response = client_response.decapsulate(&enc_response).unwrap();
 
-    let res = Message::read_bhttp(&mut io::BufReader::new(&response[..])).unwrap();
+    let response = Message::read_bhttp(&mut io::BufReader::new(&dec_response[..])).unwrap();
     println!("Response:");
-    res.write_http(&mut io::stdout()).unwrap();
+    response.write_http(&mut io::stdout()).unwrap();
     println!("END");
     io::stdout().flush().unwrap();
 }

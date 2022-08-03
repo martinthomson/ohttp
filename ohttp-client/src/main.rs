@@ -1,3 +1,5 @@
+#![deny(warnings, clippy::pedantic)]
+
 use bhttp::{Message, Mode};
 use std::fs::File;
 use std::io;

@@ -3,6 +3,7 @@
 
 use bhttp::{Error, Message, Mode};
 use std::io::BufReader;
+use std::mem::drop;
 
 const CHUNKED_HTTP: &[u8] = b"HTTP/1.1 200 OK\r\n\
                               Transfer-Encoding: camel, chunked\r\n\
@@ -49,17 +50,17 @@ const REQUEST_KNOWN: &[u8] = &[
 
 #[test]
 fn chunked_read() {
-    let _ = Message::read_http(&mut BufReader::new(CHUNKED_HTTP)).unwrap();
+    drop(Message::read_http(&mut BufReader::new(CHUNKED_HTTP)).unwrap());
 }
 
 #[test]
 fn chunked_read_known() {
-    let _ = Message::read_bhttp(&mut BufReader::new(CHUNKED_KNOWN)).unwrap();
+    drop(Message::read_bhttp(&mut BufReader::new(CHUNKED_KNOWN)).unwrap());
 }
 
 #[test]
 fn chunked_read_indefinite() {
-    let _ = Message::read_bhttp(&mut BufReader::new(CHUNKED_INDEFINITE)).unwrap();
+    drop(Message::read_bhttp(&mut BufReader::new(CHUNKED_INDEFINITE)).unwrap());
 }
 
 #[test]
