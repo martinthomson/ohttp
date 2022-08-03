@@ -1,15 +1,15 @@
 [package]
 name = "ohttp"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2018"
+edition = "2021"
 build = "build.rs"
 
 [features]
-default = ["client", "server", "nss"]
+default = ["client", "server", "rust-hpke"]
 client = []
 server = []
-nss = []
+nss = ["bindgen"]
 rust-hpke = ["hpke/x25519", "rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2"]
 
 [dependencies]
@@ -26,7 +26,12 @@ aes-gcm = {version = "0.9", optional = true}
 chacha20poly1305 = {version = "0.8", optional = true}
 
 [build-dependencies]
-bindgen = {version = "0.56", default-features = false, features = ["runtime"]}
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.5"
+
+[build-dependencies.bindgen]
+version = "0.56"
+default-features = false
+optional = true
+features = ["runtime"]

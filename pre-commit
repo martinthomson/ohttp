@@ -24,8 +24,10 @@ if [[ "$1" == "install" ]]; then
 fi
 
 # Check formatting.
-trap 'git stash pop -q' EXIT
-git stash push -k -u -q -m "pre-commit stash"
+if [[ "$1" != "all" ]]; then
+    trap 'git stash pop -q' EXIT
+    git stash push -k -u -q -m "pre-commit stash"
+fi
 if ! errors=($(cargo fmt -- --check -l)); then
     echo "Formatting errors found."
     echo "Run \`cargo fmt\` to fix the following files:"
@@ -37,12 +39,14 @@ fi
 if ! cargo clippy --tests; then
     exit 1
 fi
-if ! cargo clippy --tests --no-default-features --features rust-hpke; then
-    exit 1
-fi
 if ! cargo test; then
     exit 1
 fi
-if ! cargo test --no-default-features --features rust-hpke; then
-    exit 1
+if [[ -n "$NSS_DIR" ]]; then
+    if ! cargo clippy --tests --no-default-features --features nss; then
+        exit 1
+    fi
+    if ! cargo test --no-default-features --features nss; then
+        exit 1
+    fi
 fi
