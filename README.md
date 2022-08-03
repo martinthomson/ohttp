@@ -4,9 +4,6 @@ This is a rust implementation of [Oblivious
 HTTP](https://unicorn-wg.github.io/oblivious-http/draft-thomson-http-oblivious.html)
 and the supporting [Binary HTTP Messages](https://unicorn-wg.github.io/oblivious-http/draft-thomson-http-binary-message.html).
 
-This uses [NSS](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS)
-for cryptographic primitives.  The support for HPKE in NSS is currently
-experimental, so you will have to build NSS in order to use the `ohttp` crate.
 
 
 ## Using
@@ -32,9 +29,16 @@ cargo run --bin bhttp-convert < ./examples/response.txt | \
 ```
 
 
-## Getting and Building
+## Building against NSS
 
-The build setup is a little tricky, mostly because building NSS is a bit fiddly.
+The `ohttp` crate can use the
+[Network Security Service](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS)
+library from the Mozilla project instead of native rust crates for cryptographic primatives.
+
+
+The support for HPKE in NSS is currently experimental, so you will have to build
+NSS in order to use this feature. The setup is a little tricky, mostly because
+building NSS is itself a bit fiddly.
 
 First, you need a machine capable of [building
 NSS](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Building).
@@ -77,8 +81,8 @@ Then you should be able to build and run tests:
 
 ```sh
 cd $workspace
-cargo build
-cargo test
+cargo build --no-default-features --features nss
+cargo test --no-default-features --features nss
 ```
 
 
