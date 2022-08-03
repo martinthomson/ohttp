@@ -239,7 +239,7 @@ impl KeyConfig {
         })
     }
 
-    fn select(&mut self, sym: SymmetricSuite) -> Res<HpkeConfig> {
+    fn select(&self, sym: SymmetricSuite) -> Res<HpkeConfig> {
         if self.symmetric.contains(&sym) {
             let config = HpkeConfig::new(self.kem, sym.kdf(), sym.aead());
             Ok(config)
