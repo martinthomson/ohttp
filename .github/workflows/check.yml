@@ -49,12 +49,13 @@ jobs:
         name: Build
         with:
           command: build
-          args: --tests
+          args: --tests --no-default-features --features nss,client,server
 
       - uses: actions-rs/cargo@v1
         name: Run Tests
         with:
           command: test
+          args: --no-default-features --features nss,client,server
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
 
@@ -70,7 +71,7 @@ jobs:
         if: ${{ success() || failure() }}
         with:
           command: clippy
-          args: --tests -- -D warnings
+          args: --tests --no-default-features --features nss,client,server
 
   check_rust_hpke:
     name: rust-hpke Build
@@ -86,13 +87,12 @@ jobs:
         name: Build
         with:
           command: build
-          args: --tests --no-default-features --features rust-hpke
+          args: --tests
 
       - uses: actions-rs/cargo@v1
         name: Run Tests
         with:
           command: test
-          args: --no-default-features --features rust-hpke
 
       - uses: actions-rs/cargo@v1
         name: Check formatting
@@ -106,4 +106,4 @@ jobs:
         if: ${{ success() || failure() }}
         with:
           command: clippy
-          args: --tests --no-default-features --features rust-hpke -- -D warnings
+          args: --tests
