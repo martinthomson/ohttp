@@ -5,7 +5,7 @@ if [[ "$#" -ne 1 ]]; then
    exit 2
 fi
 
-set -e
+trap 'echo "*** release failed"; exit 1' ERR
 
 find . -name Cargo.toml -exec sed -i -e '/^\[package\]/,/^\[/{s/^version = ".*"/version = "'"$1"'"/;}' {} \+
 find . -name Cargo.toml -exec git commit -m "Update version to $1" {} \+
