@@ -88,8 +88,8 @@ async fn main() -> Res<()> {
 
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
-    let ohttp_req = ohttp::ClientRequest::new(&args.config)?;
-    let (enc_request, ohttp_res) = ohttp_req.encapsulate(&request_buf)?;
+    let ohttp_request = ohttp::ClientRequest::new(&args.config)?;
+    let (enc_request, ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 
     let client = match &args.trust {
@@ -114,7 +114,7 @@ async fn main() -> Res<()> {
         .bytes()
         .await?;
     println!("Response: {}", hex::encode(&enc_response));
-    let response_buf = ohttp_res.decapsulate(&enc_response)?;
+    let response_buf = ohttp_response.decapsulate(&enc_response)?;
     let response = Message::read_bhttp(&mut std::io::BufReader::new(&response_buf[..]))?;
 
     let mut output: Box<dyn io::Write> = if let Some(outfile) = &args.output {
