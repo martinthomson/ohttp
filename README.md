@@ -1,18 +1,57 @@
 # Oblivious HTTP
 
 This is a rust implementation of [Oblivious
-HTTP](https://unicorn-wg.github.io/oblivious-http/draft-thomson-http-oblivious.html)
-and the supporting [Binary HTTP Messages](https://unicorn-wg.github.io/oblivious-http/draft-thomson-http-binary-message.html).
+HTTP](https://ietf-wg-ohai.github.io/oblivious-http/draft-ietf-ohai-ohttp.html)
+and the supporting [Binary HTTP
+Messages](https://httpwg.org/http-extensions/draft-ietf-httpbis-binary-message.html).
 
-This uses [NSS](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS)
-for cryptographic primitives.  The support for HPKE in NSS is currently
-experimental, so you will have to build NSS in order to use the `ohttp` crate.
+This work is undergoing active revision in the IETF and so are these
+implementations.  Use at your own risk.
+
+The `ohttp` crate uses either [hpke](https://github.com/rozbb/rust-hpke) or
+[NSS](https://firefox-source-docs.mozilla.org/security/nss/index.html) for
+cryptographic primitives.
 
 
 ## Using
 
 The API documentation is currently sparse, but the API is fairly small and
 descriptive.
+
+The `bhttp` crate has the following features:
+
+- `read-bhttp` enables parsing of binary HTTP messages.  This is enabled by
+  default.
+
+- `write-bhttp` enables writing of binary HTTP messages.  This is enabled by
+  default.
+
+- `read-http` enables a simple HTTP/1.1 message parser.  This parser is fairly
+  basic and is not recommended for production use.  Getting an HTTP/1.1 parser
+  right is a massive enterprise; this one only does the basics.  This is
+  disabled by default.
+
+- `write-http` enables writing of HTTP/1.1 messages.  This is disabled by
+  default.
+
+The `ohttp` crate has the following features:
+
+- `client` enables the client-side processing of oblivious HTTP messages:
+  encrypting requests and decrypting responses.  This is enabled by default.
+
+- `server` enables the server-side processing of oblivious HTTP messages:
+  decrypting requests and encrypting responses.  This is enabled by default.
+
+- `rust-hpke` selects the [hpke](https://github.com/rozbb/rust-hpke) crate for
+  HPKE encryption.  This is enabled by default and cannot be enabled at the same
+  time as `nss`.
+
+- `nss` selects
+  [NSS](https://firefox-source-docs.mozilla.org/security/nss/index.html).  This is
+  disabled by default and cannot be enabled at the same time as `rust-hpke`.
+
+
+## Utilities
 
 The `bhttp-convert` provides a utility that can convert between the HTTP/1.1
 message format (`message/http`) and the proposed binary format
@@ -31,8 +70,14 @@ cargo run --bin bhttp-convert < ./examples/response.txt | \
   cargo run --bin bhttp-convert -- -d
 ```
 
+Sample client and server implementations can be found in `ohttp-client` and
+`ohttp-server` respectively.  The server acts as both an Oblivious Gateway
+Resource and a Target Resource.  You will need to provide your own relay.
+Though a direct request to the server will demonstrate that things are working,
+the server sees your IP address.
 
-## Getting and Building
+
+## Getting and Building With NSS
 
 The build setup is a little tricky, mostly because building NSS is a bit fiddly.
 

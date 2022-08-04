@@ -4,6 +4,9 @@ version = "0.2.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 build = "build.rs"
+license = "MIT OR Apache-2.0"
+description = "Oblivious HTTP (draft-ietf-ohai-ohttp)"
+repository = "https://github.com/martinthomson/ohttp"
 
 [features]
 default = ["client", "server", "rust-hpke"]

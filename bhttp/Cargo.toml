@@ -3,6 +3,9 @@ name = "bhttp"
 version = "0.2.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Binary HTTP messages (draft-ietf-httpbis-binary-message)"
+repository = "https://github.com/martinthomson/ohttp"
 
 [features]
 default = ["bhttp"]
