@@ -3,6 +3,12 @@
 
 #[cfg(feature = "read-bhttp")]
 use std::convert::TryFrom;
+#[cfg(any(
+    feature = "read-http",
+    feature = "write-http",
+    feature = "read-bhttp",
+    feature = "write-bhttp"
+))]
 use std::io;
 #[cfg(feature = "read-http")]
 use url::Url;
@@ -13,6 +19,12 @@ mod parse;
 mod rw;
 
 pub use err::Error;
+#[cfg(any(
+    feature = "read-http",
+    feature = "write-http",
+    feature = "read-bhttp",
+    feature = "write-bhttp"
+))]
 use err::Res;
 #[cfg(feature = "read-http")]
 use parse::{downcase, is_ows, read_line, split_at, COLON, SEMICOLON, SLASH, SP};
@@ -737,6 +749,7 @@ impl Message {
     }
 }
 
+#[cfg(feature = "write-http")]
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut buf = Vec::new();

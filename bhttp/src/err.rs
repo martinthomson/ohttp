@@ -61,4 +61,10 @@ impl std::fmt::Display for Error {
     }
 }
 
+#[cfg(any(
+    feature = "read-http",
+    feature = "write-http",
+    feature = "read-bhttp",
+    feature = "write-bhttp"
+))]
 pub type Res<T> = Result<T, Error>;
