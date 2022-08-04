@@ -7,6 +7,7 @@ fi
 
 trap 'echo "*** release failed"; exit 1' ERR
 
-find . -name Cargo.toml -exec sed -i -e '/^\[package\]/,/^\[/{s/^version = ".*"/version = "'"$1"'"/;}' {} \+
-find . -name Cargo.toml -exec git commit -m "Update version to $1" {} \+
-git tag -m "Tag release $1" "v$1"
+v="${1#v}"
+find . -name Cargo.toml -exec sed -i -e '/^\[package\]/,/^\[/{s/^version = ".*"/version = "'"$v"'"/;}' {} \+
+find . -name Cargo.toml -exec git commit -m "Update version to $v" {} \+
+git tag -m "Tag release $v" "v$v"
