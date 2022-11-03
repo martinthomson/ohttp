@@ -230,16 +230,16 @@ mod nss {
 
         // Apply the configuration.
         for v in &bindings.types {
-            builder = builder.whitelist_type(v);
+            builder = builder.allowlist_type(v);
         }
         for v in &bindings.functions {
-            builder = builder.whitelist_function(v);
+            builder = builder.allowlist_function(v);
         }
         for v in &bindings.variables {
-            builder = builder.whitelist_var(v);
+            builder = builder.allowlist_var(v);
         }
         for v in &bindings.exclude {
-            builder = builder.blacklist_item(v);
+            builder = builder.blocklist_item(v);
         }
         for v in &bindings.opaque {
             builder = builder.opaque_type(v);
