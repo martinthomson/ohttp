@@ -615,6 +615,7 @@ impl Message {
     }
 
     #[cfg(feature = "read-http")]
+    #[allow(clippy::read_zero_byte_vec)] // https://github.com/rust-lang/rust-clippy/issues/9274
     pub fn read_http(r: &mut impl io::BufRead) -> Res<Self> {
         let line = read_line(r)?;
         let mut control = ControlData::read_http(line)?;
@@ -641,8 +642,10 @@ impl Message {
             if let Some(cl) = header.get(CONTENT_LENGTH) {
                 let cl_str = String::from_utf8(Vec::from(cl))?;
                 let cl_int = cl_str.parse::<usize>()?;
-                content.resize(cl_int, 0);
-                r.read_exact(&mut content)?;
+                if cl_int > 0 {
+                    content.resize(cl_int, 0);
+                    r.read_exact(&mut content)?;
+                }
             } else {
                 // Note that for a request, the spec states that the content is
                 // empty, but this just reads all input like for a response.

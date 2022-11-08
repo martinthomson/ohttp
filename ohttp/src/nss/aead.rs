@@ -95,7 +95,7 @@ impl Aead {
         trace!(
             "New AEAD: key={} nonce_base={}",
             hex::encode(key.key_data()?),
-            hex::encode(&nonce_base)
+            hex::encode(nonce_base)
         );
 
         let ptr = unsafe {
