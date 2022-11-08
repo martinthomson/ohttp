@@ -230,16 +230,16 @@ mod nss {
 
         // Apply the configuration.
         for v in &bindings.types {
-            builder = builder.whitelist_type(v);
+            builder = builder.allowlist_type(v);
         }
         for v in &bindings.functions {
-            builder = builder.whitelist_function(v);
+            builder = builder.allowlist_function(v);
         }
         for v in &bindings.variables {
-            builder = builder.whitelist_var(v);
+            builder = builder.allowlist_var(v);
         }
         for v in &bindings.exclude {
-            builder = builder.blacklist_item(v);
+            builder = builder.blocklist_item(v);
         }
         for v in &bindings.opaque {
             builder = builder.opaque_type(v);
@@ -334,9 +334,88 @@ mod nss {
         flags
     }
 
+    #[cfg(feature = "gecko")]
+    fn setup_for_gecko() -> Vec<String> {
+        use mozbuild::TOPOBJDIR;
+
+        let mut flags: Vec<String> = Vec::new();
+
+        let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;
+        let libs = if fold_libs {
+            vec!["nss3"]
+        } else {
+            vec!["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
+        };
+
+        for lib in &libs {
+            println!("cargo:rustc-link-lib=dylib={}", lib);
+        }
+
+        if fold_libs {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                TOPOBJDIR.join("security").to_str().unwrap()
+            );
+        } else {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
+            );
+            let nsslib_path = TOPOBJDIR.join("security").join("nss").join("lib");
+            println!(
+                "cargo:rustc-link-search=native={}",
+                nsslib_path.join("nss").join("nss_nss3").to_str().unwrap()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                nsslib_path.join("ssl").join("ssl_ssl3").to_str().unwrap()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                TOPOBJDIR
+                    .join("config")
+                    .join("external")
+                    .join("nspr")
+                    .join("pr")
+                    .to_str()
+                    .unwrap()
+            );
+        }
+
+        let flags_path = TOPOBJDIR.join("netwerk/socket/neqo/extra-bindgen-flags");
+
+        println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
+        flags = fs::read_to_string(flags_path)
+            .expect("Failed to read extra-bindgen-flags file")
+            .split_whitespace()
+            .map(std::borrow::ToOwned::to_owned)
+            .collect();
+
+        flags.push(String::from("-include"));
+        flags.push(
+            TOPOBJDIR
+                .join("dist")
+                .join("include")
+                .join("mozilla-config.h")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
+        flags
+    }
+
+    #[cfg(not(feature = "gecko"))]
+    fn setup_for_gecko() -> Vec<String> {
+        unreachable!()
+    }
+
     pub fn build() {
         println!("cargo:rerun-if-env-changed=NSS_DIR");
-        let flags = nss_dir().map_or_else(pkg_config, |nss| build_nss(&nss));
+        let flags = if cfg!(feature = "gecko") {
+            setup_for_gecko()
+        } else {
+            nss_dir().map_or_else(pkg_config, |nss| build_nss(&nss))
+        };
 
         let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
         println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
