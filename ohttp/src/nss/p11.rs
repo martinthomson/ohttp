@@ -6,7 +6,6 @@
 
 use super::err::{secstatus_to_res, Error};
 use crate::err::Res;
-use std::boxed::Box;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::mem;
@@ -244,7 +243,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     }
 
     pub fn ptr(&mut self) -> *mut SECItem {
-        (&mut self.item) as *mut SECItem
+        std::ptr::addr_of_mut!(self.item)
     }
 }
 
