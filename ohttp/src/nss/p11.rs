@@ -6,12 +6,10 @@
 
 use super::err::{secstatus_to_res, Error};
 use crate::err::Res;
-use std::boxed::Box;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::{c_int, c_uint};
-use std::pin::Pin;
 use std::ptr::null_mut;
 
 #[allow(
@@ -226,32 +224,26 @@ pub fn random(size: usize) -> Vec<u8> {
     buf
 }
 
-pub(crate) struct ParamItem<T> {
-    reference: Pin<Box<SECItem>>,
-    _params: Vec<u8>,
-    marker: PhantomData<T>,
+pub(crate) struct ParamItem<'a, T: 'a> {
+    item: SECItem,
+    marker: PhantomData<&'a T>,
 }
 
-impl<T: Sized> ParamItem<T> {
-    pub fn new(v: &T) -> Self {
-        let slc = unsafe {
-            std::slice::from_raw_parts((v as *const T).cast::<u8>(), mem::size_of::<T>())
-        };
-        let mut params = Vec::from(slc);
-        let reference = Box::pin(SECItem {
+impl<'a, T: Sized + 'a> ParamItem<'a, T> {
+    pub fn new(v: &'a mut T) -> Self {
+        let item = SECItem {
             type_: SECItemType::siBuffer,
-            data: params.as_mut_ptr().cast(),
-            len: c_uint::try_from(params.len()).unwrap(),
-        });
+            data: (v as *mut T).cast::<u8>(),
+            len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
+        };
         Self {
-            reference,
-            _params: params,
+            item,
             marker: PhantomData::default(),
         }
     }
 
     pub fn ptr(&mut self) -> *mut SECItem {
-        Pin::into_inner(self.reference.as_mut()) as *mut SECItem
+        std::ptr::addr_of_mut!(self.item)
     }
 }
 

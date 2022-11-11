@@ -73,7 +73,7 @@ impl Hkdf {
         } else {
             CKF_HKDF_SALT_DATA
         };
-        let mut params = ParamItem::new(&CK_HKDF_PARAMS {
+        let mut params = CK_HKDF_PARAMS {
             bExtract: CK_BBOOL::from(true),
             bExpand: CK_BBOOL::from(false),
             prfHashMechanism: self.mech(),
@@ -83,12 +83,13 @@ impl Hkdf {
             hSaltKey: CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE),
             pInfo: null_mut(),
             ulInfoLen: 0,
-        });
+        };
+        let mut params_item = ParamItem::new(&mut params);
         let ptr = unsafe {
             sys::PK11_Derive(
                 **ikm,
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
-                params.ptr(),
+                params_item.ptr(),
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
                 CK_MECHANISM_TYPE::from(CKA_DERIVE),
                 0,
@@ -105,8 +106,9 @@ impl Hkdf {
         Ok(prk)
     }
 
-    fn expand_params(&self, info: &[u8]) -> ParamItem<CK_HKDF_PARAMS> {
-        ParamItem::new(&CK_HKDF_PARAMS {
+    // NB: `info` must outlive the returned value.
+    fn expand_params(&self, info: &[u8]) -> CK_HKDF_PARAMS {
+        CK_HKDF_PARAMS {
             bExtract: CK_BBOOL::from(false),
             bExpand: CK_BBOOL::from(true),
             prfHashMechanism: self.mech(),
@@ -116,15 +118,17 @@ impl Hkdf {
             hSaltKey: CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE),
             pInfo: info.as_ptr() as *mut _, // const-cast = bad API
             ulInfoLen: CK_ULONG::try_from(info.len()).unwrap(),
-        })
+        }
     }
 
     pub fn expand_key(&self, prk: &SymKey, info: &[u8], key_mech: KeyMechanism) -> Res<SymKey> {
+        let mut params = self.expand_params(info);
+        let mut params_item = ParamItem::new(&mut params);
         let ptr = unsafe {
             sys::PK11_Derive(
                 **prk,
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
-                self.expand_params(info).ptr(),
+                params_item.ptr(),
                 key_mech.mech(),
                 CK_MECHANISM_TYPE::from(CKA_DERIVE),
                 c_int::try_from(key_mech.len()).unwrap(),
@@ -141,11 +145,13 @@ impl Hkdf {
     }
 
     pub fn expand_data(&self, prk: &SymKey, info: &[u8], len: usize) -> Res<Vec<u8>> {
+        let mut params = self.expand_params(info);
+        let mut params_item = ParamItem::new(&mut params);
         let ptr = unsafe {
             sys::PK11_Derive(
                 **prk,
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
-                self.expand_params(info).ptr(),
+                params_item.ptr(),
                 CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
                 CK_MECHANISM_TYPE::from(CKA_DERIVE),
                 c_int::try_from(len).unwrap(),
