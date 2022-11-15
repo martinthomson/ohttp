@@ -13,14 +13,13 @@ mod nss;
 mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
-mod rw;
 
 pub use err::Error;
 
 use crate::hpke::{Aead as AeadId, Kdf, Kem};
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use err::Res;
 use log::trace;
-use rw::{read_uint, read_uvec, write_uint};
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::io::{BufReader, Read};
@@ -177,18 +176,17 @@ impl KeyConfig {
     /// Not as a result of this function.
     pub fn encode(&self) -> Res<Vec<u8>> {
         let mut buf = Vec::new();
-        write_uint(size_of::<KeyId>(), self.key_id, &mut buf)?;
-        write_uint(2, u16::from(self.kem), &mut buf)?;
+        buf.write_u8(self.key_id)?;
+        buf.write_u16::<NetworkEndian>(u16::from(self.kem))?;
         let pk_buf = self.pk.key_data()?;
         buf.extend_from_slice(&pk_buf);
-        write_uint(
-            2,
-            u16::try_from(self.symmetric.len() * 4).unwrap(),
-            &mut buf,
-        )?;
+        if self.symmetric.len() > (u16::MAX / 4) as usize {
+            return Err(Error::Internal);
+        }
+        buf.write_u16::<NetworkEndian>((self.symmetric.len() * 4).try_into().unwrap())?;
         for s in &self.symmetric {
-            write_uint(2, u16::from(s.kdf()), &mut buf)?;
-            write_uint(2, u16::from(s.aead()), &mut buf)?;
+            buf.write_u16::<NetworkEndian>(u16::from(s.kdf()))?;
+            buf.write_u16::<NetworkEndian>(u16::from(s.aead()))?;
         }
         Ok(buf)
     }
@@ -197,8 +195,8 @@ impl KeyConfig {
     /// The format of `encoded_config` is the output of `Self::encode`.
     fn parse(encoded_config: &[u8]) -> Res<Self> {
         let mut r = BufReader::new(encoded_config);
-        let key_id = KeyId::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
-        let kem = Kem::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
+        let key_id = r.read_u8()?;
+        let kem = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
 
         // Note that the KDF and AEAD doesn't matter here.
         let kem_config = HpkeConfig::new(kem, Kdf::HkdfSha256, AeadId::Aes128Gcm);
@@ -208,7 +206,9 @@ impl KeyConfig {
         let mut pk_buf = vec![0; kem_config.kem().n_pk()];
         r.read_exact(&mut pk_buf)?;
 
-        let sym = read_uvec(2, &mut r)?;
+        let sym_len = r.read_u16::<NetworkEndian>()?;
+        let mut sym = vec![0; sym_len as usize];
+        r.read_exact(&mut sym)?;
         if sym.is_empty() || (sym.len() % 4 != 0) {
             return Err(Error::Format);
         }
@@ -216,8 +216,8 @@ impl KeyConfig {
         let mut sym_r = BufReader::new(&sym[..]);
         let mut symmetric = Vec::with_capacity(sym_count);
         for _ in 0..sym_count {
-            let kdf = Kdf::try_from(u16::try_from(read_uint(2, &mut sym_r)?).unwrap())?;
-            let aead = AeadId::try_from(u16::try_from(read_uint(2, &mut sym_r)?).unwrap())?;
+            let kdf = Kdf::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
+            let aead = AeadId::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
             symmetric.push(SymmetricSuite::new(kdf, aead));
         }
 
@@ -254,10 +254,10 @@ fn build_info(key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
     let mut info = Vec::with_capacity(INFO_LEN);
     info.extend_from_slice(INFO_REQUEST);
     info.push(0);
-    write_uint(size_of::<KeyId>(), key_id, &mut info)?;
-    write_uint(2, u16::from(config.kem()), &mut info)?;
-    write_uint(2, u16::from(config.kdf()), &mut info)?;
-    write_uint(2, u16::from(config.aead()), &mut info)?;
+    info.write_u8(key_id)?;
+    info.write_u16::<NetworkEndian>(u16::from(config.kem()))?;
+    info.write_u16::<NetworkEndian>(u16::from(config.kdf()))?;
+    info.write_u16::<NetworkEndian>(u16::from(config.aead()))?;
     trace!("HPKE info: {}", hex::encode(&info));
     Ok(info)
 }
@@ -343,16 +343,16 @@ impl Server {
             return Err(Error::Truncated);
         }
         let mut r = BufReader::new(enc_request);
-        let key_id = u8::try_from(read_uint(size_of::<KeyId>(), &mut r)?).unwrap();
+        let key_id = r.read_u8()?;
         if key_id != self.config.key_id {
             return Err(Error::KeyId);
         }
-        let kem_id = Kem::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
+        let kem_id = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
         if kem_id != self.config.kem {
             return Err(Error::InvalidKem);
         }
-        let kdf_id = Kdf::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
-        let aead_id = AeadId::try_from(u16::try_from(read_uint(2, &mut r)?).unwrap())?;
+        let kdf_id = Kdf::try_from(r.read_u16::<NetworkEndian>()?)?;
+        let aead_id = AeadId::try_from(r.read_u16::<NetworkEndian>()?)?;
         let sym = SymmetricSuite::new(kdf_id, aead_id);
 
         let info = build_info(
