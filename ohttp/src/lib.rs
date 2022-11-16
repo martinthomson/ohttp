@@ -180,10 +180,7 @@ impl KeyConfig {
         buf.write_u16::<NetworkEndian>(u16::from(self.kem))?;
         let pk_buf = self.pk.key_data()?;
         buf.extend_from_slice(&pk_buf);
-        if self.symmetric.len() > (u16::MAX / 4) as usize {
-            return Err(Error::Internal);
-        }
-        buf.write_u16::<NetworkEndian>((self.symmetric.len() * 4).try_into().unwrap())?;
+        buf.write_u16::<NetworkEndian>((self.symmetric.len() * 4).try_into()?)?;
         for s in &self.symmetric {
             buf.write_u16::<NetworkEndian>(u16::from(s.kdf()))?;
             buf.write_u16::<NetworkEndian>(u16::from(s.aead()))?;
@@ -207,7 +204,7 @@ impl KeyConfig {
         r.read_exact(&mut pk_buf)?;
 
         let sym_len = r.read_u16::<NetworkEndian>()?;
-        let mut sym = vec![0; sym_len as usize];
+        let mut sym = vec![0; usize::from(sym_len)];
         r.read_exact(&mut sym)?;
         if sym.is_empty() || (sym.len() % 4 != 0) {
             return Err(Error::Format);

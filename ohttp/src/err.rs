@@ -25,6 +25,8 @@ pub enum Error {
     Truncated,
     /// The configuration was not supported.
     Unsupported,
+    /// The configuration contained too many symmetric suites.
+    TooManySymmetricSuites,
 }
 
 macro_rules! forward_errors {
@@ -57,6 +59,12 @@ forward_errors! {
     #[cfg(feature = "rust-hpke")]
     ::hpke::HpkeError => Hpke,
     std::io::Error => Io,
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    fn from(_v: std::num::TryFromIntError) -> Self {
+        Self::TooManySymmetricSuites
+    }
 }
 
 impl std::fmt::Display for Error {
