@@ -5,7 +5,7 @@ use super::p11::sys::{
     CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
 };
 use super::p11::{Item, SymKey};
-use crate::err::Res;
+use crate::err::{Error, Res};
 use crate::hpke::Aead as AeadId;
 use log::trace;
 use std::convert::{TryFrom, TryInto};
@@ -149,6 +149,9 @@ impl Aead {
 
     pub fn open(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
+        if ct.len() < TAG_LEN {
+            return Err(Error::Truncated);
+        }
         let mut nonce = self.nonce_base;
         for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
             *n ^= u8::try_from((seq >> (8 * i)) & 0xff).unwrap();
