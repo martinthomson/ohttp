@@ -302,6 +302,7 @@ mod nss {
         );
         if let Some(minor) = v.next() {
             let minor = minor
+                .trim_end()
                 .parse::<u32>()
                 .expect("NSS minor version is not a number");
             assert!(
