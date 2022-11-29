@@ -1,6 +1,6 @@
 [package]
 name = "ohttp-client-cli"
-version = "0.2.0"
+version = "0.2.2"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 
