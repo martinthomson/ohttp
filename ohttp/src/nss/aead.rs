@@ -5,7 +5,7 @@ use super::p11::sys::{
     CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
 };
 use super::p11::{Item, SymKey};
-use crate::err::Res;
+use crate::err::{Error, Res};
 use crate::hpke::Aead as AeadId;
 use log::trace;
 use std::convert::{TryFrom, TryInto};
@@ -155,6 +155,7 @@ impl Aead {
         }
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
+        let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
@@ -166,15 +167,15 @@ impl Aead {
                 c_int_len(aad.len()),
                 pt.as_mut_ptr(),
                 &mut pt_len,
-                c_int_len(pt.len()),                           // signed :(
-                ct.as_ptr().add(ct.len() - TAG_LEN) as *mut _, // const cast :(
+                c_int_len(pt.len()),                    // signed :(
+                ct.as_ptr().add(pt_expected) as *mut _, // const cast :(
                 c_int_len(TAG_LEN),
                 ct.as_ptr(),
-                c_int_len(ct.len() - TAG_LEN),
+                c_int_len(pt_expected),
             )
         })?;
         let len = usize::try_from(pt_len).unwrap();
-        debug_assert_eq!(len, ct.len() - TAG_LEN);
+        debug_assert_eq!(len, pt_expected);
         pt.truncate(len);
         Ok(pt)
     }

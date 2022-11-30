@@ -533,6 +533,29 @@ mod test {
         assert_eq!(&response2[..], RESPONSE);
     }
 
+    #[test]
+    fn response_truncated() {
+        crate::init();
+
+        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let mut server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::new(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("Request: {}", hex::encode(REQUEST));
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        trace!("Encapsulated Response: {}", hex::encode(&enc_response));
+
+        assert!(client_response.decapsulate(&enc_response[..16]).is_err());
+    }
+
     #[cfg(feature = "rust-hpke")]
     #[test]
     fn derive_key_pair() {
