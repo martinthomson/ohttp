@@ -74,6 +74,7 @@ impl Args {
 async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
+    let _ = env_logger::try_init();
 
     let mut input: Box<dyn io::BufRead> = if let Some(infile) = &args.input {
         Box::new(io::BufReader::new(File::open(infile)?))

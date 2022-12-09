@@ -10,6 +10,7 @@ nss = ["ohttp/nss"]
 rust-hpke = ["ohttp/rust-hpke"]
 
 [dependencies]
+env_logger = {version = "0.9", default-features = false}
 hex = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 rustls = { version = "0.19", features = ["dangerous_configuration"]}

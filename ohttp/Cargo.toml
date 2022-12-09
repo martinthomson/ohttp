@@ -17,7 +17,6 @@ rust-hpke = ["hpke/x25519", "rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf
 gecko = ["mozbuild"]
 
 [dependencies]
-env_logger = {version = "0.9", default-features = false}
 hex = "0.4"
 lazy_static = "1.4"
 log = {version = "0.4.0", default-features = false}
@@ -31,13 +30,16 @@ chacha20poly1305 = {version = "0.8", optional = true}
 byteorder = "1.3"
 
 [build-dependencies]
+mozbuild = {version = "0.1", optional = true}
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.5"
-mozbuild = {version = "0.1", optional = true}
 
 [build-dependencies.bindgen]
 version = "0.63"
 default-features = false
 optional = true
 features = ["runtime"]
+
+[dev-dependencies]
+env_logger = {version = "0.9", default-features = false}
