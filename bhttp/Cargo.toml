@@ -17,7 +17,7 @@ read-http = []
 write-http = []
 
 [dependencies]
-url = "2.2.0"
+url = "2"
 
 [dev-dependencies]
 hex = "0.4"
