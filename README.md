@@ -3,10 +3,7 @@
 This is a rust implementation of [Oblivious
 HTTP](https://ietf-wg-ohai.github.io/oblivious-http/draft-ietf-ohai-ohttp.html)
 and the supporting [Binary HTTP
-Messages](https://httpwg.org/http-extensions/draft-ietf-httpbis-binary-message.html).
-
-This work is undergoing active revision in the IETF and so are these
-implementations.  Use at your own risk.
+Messages](https://www.rfc-editor.org/rfc/rfc9292.html).
 
 The `ohttp` crate uses either [hpke](https://github.com/rozbb/rust-hpke) or
 [NSS](https://firefox-source-docs.mozilla.org/security/nss/index.html) for
