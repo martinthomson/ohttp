@@ -13,11 +13,12 @@ bhttp = ["read-bhttp", "write-bhttp"]
 http = ["read-http", "write-http"]
 read-bhttp = []
 write-bhttp = []
-read-http = []
+read-http = ["url"]
 write-http = []
 
 [dependencies]
-url = "2"
+thiserror = "1"
+url = {version = "2", optional = true}
 
 [dev-dependencies]
 hex = "0.4"
