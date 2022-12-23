@@ -5,7 +5,7 @@ authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 build = "build.rs"
 license = "MIT OR Apache-2.0"
-description = "Oblivious HTTP (draft-ietf-ohai-ohttp)"
+description = "Oblivious HTTP"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
@@ -17,17 +17,18 @@ rust-hpke = ["hpke/x25519", "rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf
 gecko = ["mozbuild"]
 
 [dependencies]
+aead = {version = "0.4", optional = true, features = ["std"]}
+aes-gcm = {version = "0.9", optional = true}
+byteorder = "1.3"
+chacha20poly1305 = {version = "0.8", optional = true}
 hex = "0.4"
+hkdf = {version = "0.11", optional = true}
+hpke = {version = "0.7", optional = true, default-features = false, features = ["std"]}
 lazy_static = "1.4"
 log = {version = "0.4.0", default-features = false}
 rand = {version = "0.8", optional = true}
-hpke = {version = "0.7", optional = true, default-features = false, features = ["std"]}
-aead = {version = "0.4", optional = true, features = ["std"]}
-hkdf = {version = "0.11", optional = true}
 sha2 = {version = "0.9", optional = true}
-aes-gcm = {version = "0.9", optional = true}
-chacha20poly1305 = {version = "0.8", optional = true}
-byteorder = "1.3"
+thiserror = "1"
 
 [build-dependencies]
 mozbuild = {version = "0.1", optional = true}
