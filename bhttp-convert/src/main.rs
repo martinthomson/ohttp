@@ -2,7 +2,7 @@
 
 use bhttp::{Message, Mode};
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -46,15 +46,22 @@ impl Args {
 fn main() -> Result<(), bhttp::Error> {
     let args = Args::from_args();
 
-    let mut input: Box<dyn io::BufRead> = if let Some(infile) = &args.input {
-        Box::new(io::BufReader::new(File::open(infile)?))
+    let m = if let Some(infile) = &args.input {
+        let mut r = io::BufReader::new(File::open(infile)?);
+        if args.binary || args.decode {
+            Message::read_bhttp(&mut r)?
+        } else {
+            Message::read_http(&mut r)?
+        }
     } else {
-        Box::new(io::BufReader::new(std::io::stdin()))
-    };
-    let m = if args.binary || args.decode {
-        Message::read_bhttp(&mut input)?
-    } else {
-        Message::read_http(&mut input)?
+        let mut buf = Vec::new();
+        std::io::stdin().read_to_end(&mut buf)?;
+        let mut r = io::Cursor::new(buf);
+        if args.binary || args.decode {
+            Message::read_bhttp(&mut r)?
+        } else {
+            Message::read_http(&mut r)?
+        }
     };
 
     let mut output: Box<dyn io::Write> = if let Some(outfile) = &args.output {
