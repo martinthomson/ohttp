@@ -1,6 +1,6 @@
 [package]
 name = "bhttp"
-version = "0.2.3"
+version = "0.3.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
