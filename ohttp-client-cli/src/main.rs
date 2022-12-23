@@ -29,7 +29,7 @@ fn main() {
         request_buf.push_str("\r\n");
     }
 
-    let req = Message::read_http(&mut io::BufReader::new(request_buf.as_bytes())).unwrap();
+    let req = Message::read_http(&mut io::Cursor::new(request_buf.as_bytes())).unwrap();
     let mut request = Vec::new();
     req.write_bhttp(Mode::KnownLength, &mut request).unwrap();
     let (enc_request, client_response) = client.encapsulate(&request).unwrap();
@@ -43,7 +43,7 @@ fn main() {
     let enc_response = hex::decode(rsp.trim()).unwrap();
     let dec_response = client_response.decapsulate(&enc_response).unwrap();
 
-    let response = Message::read_bhttp(&mut io::BufReader::new(&dec_response[..])).unwrap();
+    let response = Message::read_bhttp(&mut io::Cursor::new(&dec_response[..])).unwrap();
     println!("Response:");
     response.write_http(&mut io::stdout()).unwrap();
     println!("END");

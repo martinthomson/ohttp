@@ -76,15 +76,22 @@ async fn main() -> Res<()> {
     ::ohttp::init();
     let _ = env_logger::try_init();
 
-    let mut input: Box<dyn io::BufRead> = if let Some(infile) = &args.input {
-        Box::new(io::BufReader::new(File::open(infile)?))
+    let request = if let Some(infile) = &args.input {
+        let mut r = io::BufReader::new(File::open(infile)?);
+        if args.binary {
+            Message::read_bhttp(&mut r)?
+        } else {
+            Message::read_http(&mut r)?
+        }
     } else {
-        Box::new(io::BufReader::new(std::io::stdin()))
-    };
-    let request = if args.binary {
-        Message::read_bhttp(&mut input)?
-    } else {
-        Message::read_http(&mut input)?
+        let mut buf = Vec::new();
+        std::io::stdin().read_to_end(&mut buf)?;
+        let mut r = io::Cursor::new(buf);
+        if args.binary {
+            Message::read_bhttp(&mut r)?
+        } else {
+            Message::read_http(&mut r)?
+        }
     };
 
     let mut request_buf = Vec::new();
@@ -116,7 +123,7 @@ async fn main() -> Res<()> {
         .await?;
     println!("Response: {}", hex::encode(&enc_response));
     let response_buf = ohttp_response.decapsulate(&enc_response)?;
-    let response = Message::read_bhttp(&mut std::io::BufReader::new(&response_buf[..]))?;
+    let response = Message::read_bhttp(&mut std::io::Cursor::new(&response_buf[..]))?;
 
     let mut output: Box<dyn io::Write> = if let Some(outfile) = &args.output {
         Box::new(File::open(outfile)?)

@@ -1,6 +1,8 @@
-#[cfg(feature = "read-bhttp")]
-use crate::err::Error;
 use crate::err::Res;
+#[cfg(feature = "read-bhttp")]
+use crate::{err::Error, ReadSeek};
+#[cfg(feature = "read-bhttp")]
+use std::borrow::BorrowMut;
 use std::convert::TryFrom;
 use std::io;
 
@@ -40,9 +42,13 @@ pub fn write_vec(v: &[u8], w: &mut impl io::Write) -> Res<()> {
 }
 
 #[cfg(feature = "read-bhttp")]
-fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<Option<u64>> {
+fn read_uint<T, R>(n: usize, r: &mut T) -> Res<Option<u64>>
+where
+    T: BorrowMut<R> + ?Sized,
+    R: ReadSeek + ?Sized,
+{
     let mut buf = [0; 7];
-    let count = r.read(&mut buf[..n])?;
+    let count = r.borrow_mut().read(&mut buf[..n])?;
     if count == 0 {
         return Ok(None);
     } else if count < n {
@@ -56,7 +62,11 @@ fn read_uint(n: usize, r: &mut impl io::BufRead) -> Res<Option<u64>> {
 }
 
 #[cfg(feature = "read-bhttp")]
-pub fn read_varint(r: &mut impl io::BufRead) -> Res<Option<u64>> {
+pub fn read_varint<T, R>(r: &mut T) -> Res<Option<u64>>
+where
+    T: BorrowMut<R> + ?Sized,
+    R: ReadSeek + ?Sized,
+{
     if let Some(b1) = read_uint(1, r)? {
         Ok(Some(match b1 >> 6 {
             0 => b1 & 0x3f,
@@ -71,10 +81,14 @@ pub fn read_varint(r: &mut impl io::BufRead) -> Res<Option<u64>> {
 }
 
 #[cfg(feature = "read-bhttp")]
-pub fn read_vec(r: &mut impl io::BufRead) -> Res<Option<Vec<u8>>> {
+pub fn read_vec<T, R>(r: &mut T) -> Res<Option<Vec<u8>>>
+where
+    T: BorrowMut<R> + ?Sized,
+    R: ReadSeek + ?Sized,
+{
     if let Some(len) = read_varint(r)? {
         let mut v = vec![0; usize::try_from(len).unwrap()];
-        r.read_exact(&mut v)?;
+        r.borrow_mut().read_exact(&mut v)?;
         Ok(Some(v))
     } else {
         Ok(None)

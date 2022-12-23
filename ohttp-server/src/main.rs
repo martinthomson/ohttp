@@ -5,7 +5,7 @@ use ohttp::{
     hpke::{Aead, Kdf, Kem},
     KeyConfig, Server as OhttpServer, SymmetricSuite,
 };
-use std::io::BufReader;
+use std::io::Cursor;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -51,7 +51,7 @@ fn generate_reply(
 ) -> Res<Vec<u8>> {
     let mut ohttp = ohttp_ref.lock().unwrap();
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
-    let bin_request = Message::read_bhttp(&mut BufReader::new(&request[..]))?;
+    let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
 
     let mut bin_response = Message::response(200);
     bin_response.write_content(b"Received:\r\n---8<---\r\n");
