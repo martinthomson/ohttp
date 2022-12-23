@@ -34,7 +34,7 @@ fn main() {
     req.write_bhttp(Mode::KnownLength, &mut request).unwrap();
     let (enc_request, client_response) = client.encapsulate(&request).unwrap();
 
-    println!("Encapsulated Request: {}", hex::encode(&enc_request));
+    println!("Encapsulated Request: {}", hex::encode(enc_request));
 
     print!("Encapsulated Response: ");
     io::stdout().flush().unwrap();
