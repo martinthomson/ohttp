@@ -208,3 +208,19 @@ fn bad_chunked() {
     let e = Message::read_http(&mut Cursor::new(REQUEST)).unwrap_err();
     assert!(matches!(e, Error::Truncated));
 }
+
+/// If a length field overruns the buffer, stop.
+#[test]
+fn oversized() {
+    const REQUEST: &[u8] = &[0x00, 0x01];
+    let e = Message::read_bhttp(&mut Cursor::new(REQUEST)).unwrap_err();
+    assert!(matches!(e, Error::Truncated));
+}
+
+/// If a length field overruns the buffer, stop before over-allocating.
+#[test]
+fn oversized_max() {
+    const REQUEST: &[u8] = &[0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    let e = Message::read_bhttp(&mut Cursor::new(REQUEST)).unwrap_err();
+    assert!(matches!(e, Error::Truncated));
+}

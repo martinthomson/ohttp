@@ -86,9 +86,20 @@ where
     T: BorrowMut<R> + ?Sized,
     R: ReadSeek + ?Sized,
 {
+    use std::io::SeekFrom;
+
     if let Some(len) = read_varint(r)? {
-        let mut v = vec![0; usize::try_from(len).unwrap()];
-        r.borrow_mut().read_exact(&mut v)?;
+        // Check that the input contains enough data.  Before allocating.
+        let r = r.borrow_mut();
+        let pos = r.seek(SeekFrom::Current(0))?;
+        let end = r.seek(SeekFrom::End(0))?;
+        if end - pos < len {
+            return Err(Error::Truncated);
+        }
+        let _ = r.seek(SeekFrom::Start(pos))?;
+
+        let mut v = vec![0; usize::try_from(len)?];
+        r.read_exact(&mut v)?;
         Ok(Some(v))
     } else {
         Ok(None)
