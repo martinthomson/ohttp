@@ -91,7 +91,7 @@ where
     if let Some(len) = read_varint(r)? {
         // Check that the input contains enough data.  Before allocating.
         let r = r.borrow_mut();
-        let pos = r.seek(SeekFrom::Current(0))?;
+        let pos = r.stream_position()?;
         let end = r.seek(SeekFrom::End(0))?;
         if end - pos < len {
             return Err(Error::Truncated);
