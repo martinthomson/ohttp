@@ -5,10 +5,12 @@ use ohttp::{
     hpke::{Aead, Kdf, Kem},
     KeyConfig, Server as OhttpServer, SymmetricSuite,
 };
-use std::io::Cursor;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Cursor,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use structopt::StructOpt;
 use warp::Filter;
 
