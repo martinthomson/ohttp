@@ -1,9 +1,11 @@
 #![deny(warnings, clippy::pedantic)]
 
 use bhttp::{Message, Mode};
-use std::fs::File;
-use std::io::{self, Read};
-use std::path::PathBuf;
+use std::{
+    fs::File,
+    io::{self, Read},
+    path::PathBuf,
+};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]

@@ -64,7 +64,7 @@ jobs:
         if: ${{ success() || failure() }}
         with:
           command: fmt
-          args: --all -- --check
+          args: --all -- --check --config imports_granularity=Crate
 
       - uses: actions-rs/cargo@v1
         name: Clippy
@@ -99,7 +99,7 @@ jobs:
         if: ${{ success() || failure() }}
         with:
           command: fmt
-          args: --all -- --check
+          args: --all -- --check --config imports_granularity=Crate
 
       - uses: actions-rs/cargo@v1
         name: Clippy

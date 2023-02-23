@@ -1,12 +1,7 @@
 #![deny(warnings, clippy::pedantic)]
 
 use bhttp::{Message, Mode};
-use std::fs::File;
-use std::io;
-use std::io::Read;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{fs::File, io, io::Read, ops::Deref, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;

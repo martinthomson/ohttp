@@ -20,10 +20,12 @@ use crate::hpke::{Aead as AeadId, Kdf, Kem};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use err::Res;
 use log::trace;
-use std::cmp::max;
-use std::convert::TryFrom;
-use std::io::{BufReader, Read};
-use std::mem::size_of;
+use std::{
+    cmp::max,
+    convert::TryFrom,
+    io::{BufReader, Read},
+    mem::size_of,
+};
 
 #[cfg(feature = "nss")]
 use nss::random;
@@ -474,7 +476,6 @@ impl ClientResponse {
 mod test {
     use std::fmt::Debug;
     use std::io::ErrorKind;
-
     use crate::err::Res;
     use crate::hpke::{Aead, Kdf, Kem};
     use crate::{ClientRequest, Error, KeyConfig, KeyId, Server, SymmetricSuite};

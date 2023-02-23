@@ -29,7 +29,7 @@ if [[ "$1" != "all" ]]; then
     trap 'git stash list -1 --format="format:%s" | grep -q "'"$msg"'" && git stash pop -q' EXIT
     git stash push -k -u -q -m "$msg"
 fi
-if ! errors=($(cargo fmt -- --check -l)); then
+if ! errors=($(cargo fmt -- --check --config imports_granularity=crate -l)); then
     echo "Formatting errors found."
     echo "Run \`cargo fmt\` to fix the following files:"
     for err in "${errors[@]}"; do

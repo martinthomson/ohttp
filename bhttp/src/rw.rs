@@ -3,8 +3,7 @@ use crate::err::Res;
 use crate::{err::Error, ReadSeek};
 #[cfg(feature = "read-bhttp")]
 use std::borrow::BorrowMut;
-use std::convert::TryFrom;
-use std::io;
+use std::{convert::TryFrom, io};
 
 #[cfg(feature = "write-bhttp")]
 #[allow(clippy::cast_possible_truncation)]

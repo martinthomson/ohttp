@@ -458,8 +458,7 @@ pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
 #[cfg(test)]
 mod test {
     use super::{generate_key_pair, Config, HpkeR, HpkeS};
-    use crate::hpke::Aead;
-    use crate::init;
+    use crate::{hpke::Aead, init};
 
     const INFO: &[u8] = b"info";
     const AAD: &[u8] = b"aad";

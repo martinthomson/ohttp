@@ -2,8 +2,7 @@
 #![cfg(all(feature = "http", feature = "bhttp"))]
 
 use bhttp::{Error, Message, Mode};
-use std::io::Cursor;
-use std::mem::drop;
+use std::{io::Cursor, mem::drop};
 
 const CHUNKED_HTTP: &[u8] = b"HTTP/1.1 200 OK\r\n\
                               Transfer-Encoding: camel, chunked\r\n\
