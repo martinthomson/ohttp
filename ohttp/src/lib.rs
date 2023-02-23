@@ -474,12 +474,13 @@ impl ClientResponse {
 
 #[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
-    use std::fmt::Debug;
-    use std::io::ErrorKind;
-    use crate::err::Res;
-    use crate::hpke::{Aead, Kdf, Kem};
-    use crate::{ClientRequest, Error, KeyConfig, KeyId, Server, SymmetricSuite};
+    use crate::{
+        err::Res,
+        hpke::{Aead, Kdf, Kem},
+        ClientRequest, Error, KeyConfig, KeyId, Server, SymmetricSuite,
+    };
     use log::trace;
+    use std::{fmt::Debug, io::ErrorKind};
 
     const KEY_ID: KeyId = 1;
     const KEM: Kem = Kem::X25519Sha256;
