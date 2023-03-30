@@ -37,7 +37,7 @@ serde_derive = "1.0"
 toml = "0.5"
 
 [build-dependencies.bindgen]
-version = "0.63"
+version = "0.64"
 default-features = false
 optional = true
 features = ["runtime"]
