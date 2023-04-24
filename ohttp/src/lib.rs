@@ -497,7 +497,7 @@ mod test {
 
     fn init() {
         crate::init();
-        let _ = env_logger::try_init();
+        _ = env_logger::try_init(); // ignore errors here
     }
 
     #[test]
