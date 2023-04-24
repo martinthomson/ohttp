@@ -110,10 +110,15 @@ pub struct HpkeS {
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
     #[allow(clippy::similar_names)]
-    pub fn new(config: Config, pk_r: &mut PublicKey, info: &[u8]) -> Res<Self> {
+    pub fn new(config: Config, pk_r: &PublicKey, info: &[u8]) -> Res<Self> {
         let (sk_e, pk_e) = generate_key_pair(config.kem)?;
         let context = HpkeContext::new(config)?;
         secstatus_to_res(unsafe {
+            // This somewhat abuses const-correctness for `pk_r`.
+            // We have an immutable reference that is dereferenced to get a mutable pointer.
+            // Our `PublicKey` implementation is cool with that, but it might surprise some.
+            // In practice, NSS doesn't change the structures that this points to, the API
+            // only really insists on a mutable pointer for legacy reasons.
             sys::PK11_HPKE_SetupS(*context, *pk_e, *sk_e, **pk_r, &Item::wrap(info))
         })?;
         Ok(Self { context, config })
@@ -302,8 +307,8 @@ mod test {
     fn make() {
         init();
         let cfg = Config::default();
-        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
-        let hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
+        let (mut sk_r, pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let hpke_s = HpkeS::new(cfg, &pk_r, INFO).unwrap();
         let _hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
     }
 
@@ -316,10 +321,10 @@ mod test {
             ..Config::default()
         };
         assert!(cfg.supported());
-        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let (mut sk_r, pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
-        let mut hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
+        let mut hpke_s = HpkeS::new(cfg, &pk_r, INFO).unwrap();
         let enc = hpke_s.enc().unwrap();
         let ct = hpke_s.seal(AAD, PT).unwrap();
 

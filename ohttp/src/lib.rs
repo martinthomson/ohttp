@@ -300,14 +300,13 @@ impl ClientRequest {
     /// Reads an encoded configuration and constructs a single use client sender.
     /// See `KeyConfig::encode` for the structure details.
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
-    pub fn new(encoded_config: &[u8]) -> Res<Self> {
-        let mut config = KeyConfig::decode(encoded_config)?;
+    pub fn new(config: &KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
 
         // Build the info, which contains the message header.
         let info = build_info(config.key_id, selected)?;
-        let hpke = HpkeS::new(selected, &mut config.pk, &info)?;
+        let hpke = HpkeS::new(selected, &config.pk, &info)?;
 
         let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
         debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
@@ -537,7 +536,8 @@ mod test {
         let encoded_config = server.config().encode().unwrap();
         trace!("Config: {}", hex::encode(&encoded_config));
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client_config = KeyConfig::decode(&encoded_config).unwrap();
+        let client = ClientRequest::new(&client_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
         trace!("Request: {}", hex::encode(REQUEST));
         trace!("Encapsulated Request: {}", hex::encode(&enc_request));
@@ -561,9 +561,10 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client1 = ClientRequest::new(&encoded_config).unwrap();
+        let client_config = KeyConfig::decode(&encoded_config).unwrap();
+        let client1 = ClientRequest::new(&client_config).unwrap();
         let (enc_request1, client_response1) = client1.encapsulate(REQUEST).unwrap();
-        let client2 = ClientRequest::new(&encoded_config).unwrap();
+        let client2 = ClientRequest::new(&client_config).unwrap();
         let (enc_request2, client_response2) = client2.encapsulate(REQUEST).unwrap();
         assert_ne!(enc_request1, enc_request2);
 
@@ -601,7 +602,8 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client_config = KeyConfig::decode(&encoded_config).unwrap();
+        let client = ClientRequest::new(&client_config).unwrap();
         let (enc_request, _) = client.encapsulate(REQUEST).unwrap();
 
         let res = server.decapsulate(&enc_request[..cut]);
@@ -632,7 +634,8 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client_config = KeyConfig::decode(&encoded_config).unwrap();
+        let client = ClientRequest::new(&client_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
 
         let (request, server_response) = server.decapsulate(&enc_request).unwrap();

@@ -1,6 +1,7 @@
 #![deny(warnings, clippy::pedantic)]
 
 use bhttp::{Message, Mode};
+use ohttp::KeyConfig;
 use std::{fs::File, io, io::Read, ops::Deref, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 
@@ -91,7 +92,8 @@ async fn main() -> Res<()> {
 
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
-    let ohttp_request = ohttp::ClientRequest::new(&args.config)?;
+    let config = KeyConfig::decode(&args.config)?;
+    let ohttp_request = ohttp::ClientRequest::new(&config)?;
     let (enc_request, ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 
