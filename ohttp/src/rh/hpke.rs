@@ -281,10 +281,10 @@ impl ReceiverContext {
                 if ciphertext.len() < AeadTag::<AesGcm128>::size() {
                     return Err(Error::Truncated);
                 }
-                let (mut ct, tag_slice) =
+                let (ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<AesGcm128>::size());
                 let tag = AeadTag::<AesGcm128>::from_bytes(tag_slice)?;
-                context.open_in_place_detached(&mut ct, aad, &tag)?;
+                context.open_in_place_detached(ct, aad, &tag)?;
                 ct
             }
             Self::X25519HkdfSha256(ReceiverContextX25519HkdfSha256::HkdfSha256(
@@ -293,10 +293,10 @@ impl ReceiverContext {
                 if ciphertext.len() < AeadTag::<ChaCha20Poly1305>::size() {
                     return Err(Error::Truncated);
                 }
-                let (mut ct, tag_slice) =
+                let (ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<ChaCha20Poly1305>::size());
                 let tag = AeadTag::<ChaCha20Poly1305>::from_bytes(tag_slice)?;
-                context.open_in_place_detached(&mut ct, aad, &tag)?;
+                context.open_in_place_detached(ct, aad, &tag)?;
                 ct
             }
         })
