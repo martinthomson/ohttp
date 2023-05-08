@@ -4,13 +4,10 @@ use crate::{
     Error, Res,
 };
 use ::hpke::{
-    aead::{AeadTag, AesGcm128, ChaCha20Poly1305},
+    aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, ChaCha20Poly1305},
     kdf::HkdfSha256,
-    kem::{Kem as HpkeKem, X25519HkdfSha256},
-    kex::{KeyExchange, X25519},
-    op_mode::{OpModeR, OpModeS},
-    setup::{setup_receiver, setup_sender},
-    AeadCtxR, AeadCtxS, Deserializable, EncappedKey, Serializable,
+    kem::{Kem as KemTrait, X25519HkdfSha256},
+    setup_receiver, setup_sender, Deserializable, OpModeR, OpModeS, Serializable,
 };
 use ::rand::thread_rng;
 use log::trace;
@@ -58,7 +55,7 @@ impl Default for Config {
 }
 
 pub enum PublicKey {
-    X25519(<<X25519HkdfSha256 as HpkeKem>::Kex as KeyExchange>::PublicKey),
+    X25519(<X25519HkdfSha256 as KemTrait>::PublicKey),
 }
 
 impl PublicKey {
@@ -81,7 +78,7 @@ impl std::fmt::Debug for PublicKey {
 }
 
 pub enum PrivateKey {
-    X25519(<<X25519HkdfSha256 as HpkeKem>::Kex as KeyExchange>::PrivateKey),
+    X25519(<X25519HkdfSha256 as KemTrait>::PrivateKey),
 }
 
 impl PrivateKey {
@@ -124,13 +121,13 @@ impl SenderContext {
             Self::X25519HkdfSha256(SenderContextX25519HkdfSha256::HkdfSha256(
                 SenderContextX25519HkdfSha256HkdfSha256::AesGcm128(context),
             )) => {
-                let tag = context.seal(plaintext, aad)?;
+                let tag = context.seal_in_place_detached(plaintext, aad)?;
                 Vec::from(tag.to_bytes().as_slice())
             }
             Self::X25519HkdfSha256(SenderContextX25519HkdfSha256::HkdfSha256(
                 SenderContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305(context),
             )) => {
-                let tag = context.seal(plaintext, aad)?;
+                let tag = context.seal_in_place_detached(plaintext, aad)?;
                 Vec::from(tag.to_bytes().as_slice())
             }
         })
@@ -284,10 +281,10 @@ impl ReceiverContext {
                 if ciphertext.len() < AeadTag::<AesGcm128>::size() {
                     return Err(Error::Truncated);
                 }
-                let (ct, tag) =
+                let (mut ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<AesGcm128>::size());
-                let tag = AeadTag::<AesGcm128>::from_bytes(tag)?;
-                context.open(ct, aad, &tag)?;
+                let tag = AeadTag::<AesGcm128>::from_bytes(tag_slice)?;
+                context.open_in_place_detached(&mut ct, aad, &tag)?;
                 ct
             }
             Self::X25519HkdfSha256(ReceiverContextX25519HkdfSha256::HkdfSha256(
@@ -296,10 +293,10 @@ impl ReceiverContext {
                 if ciphertext.len() < AeadTag::<ChaCha20Poly1305>::size() {
                     return Err(Error::Truncated);
                 }
-                let (ct, tag) =
+                let (mut ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<ChaCha20Poly1305>::size());
-                let tag = AeadTag::<ChaCha20Poly1305>::from_bytes(tag)?;
-                context.open(ct, aad, &tag)?;
+                let tag = AeadTag::<ChaCha20Poly1305>::from_bytes(tag_slice)?;
+                context.open_in_place_detached(&mut ct, aad, &tag)?;
                 ct
             }
         })
@@ -357,7 +354,7 @@ impl HpkeR {
                             },
                             $ske(sk_r),
                         ) => {
-                            let enc = EncappedKey::from_bytes(enc)?;
+                            let enc = <$kem as KemTrait>::EncappedKey::from_bytes(enc)?;
                             let context = setup_receiver::<$aead, $kdf, $kem>(
                                 &OpModeR::Base,
                                 sk_r,
@@ -401,7 +398,7 @@ impl HpkeR {
     pub fn decode_public_key(kem: Kem, k: &[u8]) -> Res<PublicKey> {
         Ok(match kem {
             Kem::X25519Sha256 => {
-                PublicKey::X25519(<X25519 as KeyExchange>::PublicKey::from_bytes(k)?)
+                PublicKey::X25519(<X25519HkdfSha256 as KemTrait>::PublicKey::from_bytes(k)?)
             }
         })
     }
