@@ -102,7 +102,7 @@ fn with_ohttp(
 async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
-    _ = env_logger::try_init();
+    env_logger::try_init().unwrap();
 
     let config = KeyConfig::new(
         0,

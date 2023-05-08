@@ -23,7 +23,7 @@ use log::trace;
 use std::{
     cmp::max,
     convert::TryFrom,
-    io::{BufReader, Read},
+    io::{BufRead, BufReader, Cursor, Read},
     mem::size_of,
 };
 
@@ -191,8 +191,9 @@ impl KeyConfig {
 
     /// Construct a configuration from the encoded server configuration.
     /// The format of `encoded_config` is the output of `Self::encode`.
-    fn parse(encoded_config: &[u8]) -> Res<Self> {
-        let mut r = BufReader::new(encoded_config);
+    pub fn decode(encoded_config: &[u8]) -> Res<Self> {
+        let end_position = u64::try_from(encoded_config.len())?;
+        let mut r = Cursor::new(encoded_config);
         let key_id = r.read_u8()?;
         let kem = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
 
@@ -219,9 +220,8 @@ impl KeyConfig {
             symmetric.push(SymmetricSuite::new(kdf, aead));
         }
 
-        // Check that there was nothing extra.
-        let mut tmp = [0; 1];
-        if r.read(&mut tmp)? > 0 {
+        // Check that there was nothing extra and we are at the end of the buffer.
+        if r.position() != end_position {
             return Err(Error::Format);
         }
 
@@ -235,6 +235,33 @@ impl KeyConfig {
             sk: None,
             pk,
         })
+    }
+
+    /// Decode a list of key configurations.
+    /// This only returns the valid and supported key configurations;
+    /// unsupported configurations are dropped silently.
+    pub fn decode_list(encoded_list: &[u8]) -> Res<Vec<Self>> {
+        let end_position = u64::try_from(encoded_list.len())?;
+        let mut r = Cursor::new(encoded_list);
+        let mut configs = Vec::new();
+        loop {
+            if r.position() == end_position {
+                break;
+            }
+            let len = usize::from(r.read_u16::<NetworkEndian>()?);
+            let buf = r.fill_buf()?;
+            if len > buf.len() {
+                return Err(Error::Truncated);
+            }
+            let res = Self::decode(&buf[..len]);
+            r.consume(len);
+            match res {
+                Ok(config) => configs.push(config),
+                Err(Error::Unsupported) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(configs)
     }
 
     fn select(&self, sym: SymmetricSuite) -> Res<HpkeConfig> {
@@ -274,7 +301,7 @@ impl ClientRequest {
     /// See `KeyConfig::encode` for the structure details.
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
     pub fn new(encoded_config: &[u8]) -> Res<Self> {
-        let mut config = KeyConfig::parse(encoded_config)?;
+        let mut config = KeyConfig::decode(encoded_config)?;
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
 
@@ -479,8 +506,9 @@ mod test {
         hpke::{Aead, Kdf, Kem},
         ClientRequest, Error, KeyConfig, KeyId, Server, SymmetricSuite,
     };
+    use byteorder::{NetworkEndian, WriteBytesExt};
     use log::trace;
-    use std::{fmt::Debug, io::ErrorKind};
+    use std::{fmt::Debug, io::ErrorKind, iter::zip};
 
     const KEY_ID: KeyId = 1;
     const KEM: Kem = Kem::X25519Sha256;
@@ -497,7 +525,7 @@ mod test {
 
     fn init() {
         crate::init();
-        _ = env_logger::try_init();
+        _ = env_logger::try_init(); // ignore errors here
     }
 
     #[test]
@@ -643,7 +671,7 @@ mod test {
 
         init();
 
-        let config = KeyConfig::parse(EXPECTED_CONFIG).unwrap();
+        let config = KeyConfig::decode(EXPECTED_CONFIG).unwrap();
 
         let new_config = KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), IKM).unwrap();
         assert_eq!(config.key_id, new_config.key_id);
@@ -653,5 +681,103 @@ mod test {
         let server = Server::new(new_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
         assert_eq!(EXPECTED_CONFIG, encoded_config);
+    }
+
+    #[test]
+    fn encode_decode_config_list() {
+        const COUNT: usize = 3;
+        init();
+
+        let mut configs = Vec::with_capacity(COUNT);
+        configs.resize_with(COUNT, || {
+            KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap()
+        });
+
+        let mut buf = Vec::new();
+        for c in &configs {
+            let mut encoded = c.encode().unwrap();
+            buf.write_u16::<NetworkEndian>(u16::try_from(encoded.len()).unwrap())
+                .unwrap();
+            buf.append(&mut encoded);
+        }
+
+        let decoded_list = KeyConfig::decode_list(&buf).unwrap();
+        for (original, decoded) in zip(&configs, &decoded_list) {
+            assert_eq!(decoded.key_id, original.key_id);
+            assert_eq!(decoded.kem, original.kem);
+            assert_eq!(
+                decoded.pk.key_data().unwrap(),
+                original.pk.key_data().unwrap()
+            );
+            assert!(decoded.sk.is_none());
+            assert!(original.sk.is_some());
+        }
+
+        // Check that truncation errors in `KeyConfig::decode` are caught.
+        assert!(KeyConfig::decode_list(&buf[..buf.len() - 3]).is_err());
+    }
+
+    #[test]
+    fn empty_config_list() {
+        let list = KeyConfig::decode_list(&[]).unwrap();
+        assert!(list.is_empty());
+
+        // A reserved KEM ID is not bad.  Note that we don't check that the data
+        // following the KEM ID is even the minimum length, allowing this to be
+        // zero bytes, where you need at least some bytes in a public key and some
+        // bytes to identify at least one KDF and AEAD (i.e., more than 6 bytes).
+        let list = KeyConfig::decode_list(&[0, 3, 0, 0, 0]).unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn bad_config_list_length() {
+        init();
+
+        // A one byte length for a config.
+        let res = KeyConfig::decode_list(&[0]);
+        assert!(matches!(res, Err(Error::Io(_))));
+    }
+
+    #[test]
+    fn decode_bad_config() {
+        init();
+
+        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
+            .unwrap()
+            .encode()
+            .unwrap();
+        {
+            // Truncation tests.
+            let trunc = |n: usize| KeyConfig::decode(&x25519[..n]);
+
+            // x25519, truncated inside the KEM ID.
+            assert!(matches!(trunc(2), Err(Error::Io(_))));
+            // ... inside the public key.
+            assert!(matches!(trunc(4), Err(Error::Io(_))));
+            // ... inside the length of the KDF+AEAD list.
+            assert!(matches!(trunc(36), Err(Error::Io(_))));
+            // ... inside the KDF+AEAD list.
+            assert!(matches!(trunc(38), Err(Error::Io(_))));
+        }
+
+        // And then with an extra byte at the end.
+        x25519.push(0);
+        assert!(matches!(KeyConfig::decode(&x25519), Err(Error::Format)));
+    }
+
+    /// Truncate the KDF+AEAD list badly.
+    #[test]
+    fn truncate_kdf_aead_list() {
+        init();
+
+        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
+            .unwrap()
+            .encode()
+            .unwrap();
+        x25519.truncate(38);
+        assert_eq!(usize::from(x25519[36]), SYMMETRIC.len() * 4);
+        x25519[36] = 1;
+        assert!(matches!(KeyConfig::decode(&x25519), Err(Error::Format)));
     }
 }

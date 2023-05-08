@@ -6,7 +6,7 @@ use std::io::{self, BufRead, Write};
 
 fn main() {
     init();
-    _ = env_logger::try_init();
+    env_logger::try_init().unwrap();
 
     let mut input = io::BufReader::new(io::stdin());
     print!("Config: ");
