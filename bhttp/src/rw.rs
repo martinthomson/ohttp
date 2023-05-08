@@ -95,7 +95,7 @@ where
         if end - pos < len {
             return Err(Error::Truncated);
         }
-        let _ = r.seek(SeekFrom::Start(pos))?;
+        _ = r.seek(SeekFrom::Start(pos))?;
 
         let mut v = vec![0; usize::try_from(len)?];
         r.read_exact(&mut v)?;

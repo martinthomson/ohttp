@@ -69,7 +69,7 @@ impl Args {
 async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
-    let _ = env_logger::try_init();
+    _ = env_logger::try_init();
 
     let request = if let Some(infile) = &args.input {
         let mut r = io::BufReader::new(File::open(infile)?);
