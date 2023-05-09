@@ -9,11 +9,13 @@ description = "Oblivious HTTP"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
-default = ["client", "server", "rust-hpke"]
+default = ["client", "server", "rust-hpke-nopq"]
 client = []
 server = []
 nss = ["bindgen"]
-rust-hpke = ["hpke/x25519", "rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke/xyber768d00"]
+rust-hpke-nopq = ["rust-hpke", "hpke"]
+rust-hpke-pq = ["rust-hpke", "hpke-pq"]
+rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2"]
 gecko = ["mozbuild"]
 
 [dependencies]
@@ -28,13 +30,15 @@ log = {version = "0.4.0", default-features = false}
 rand = {version = "0.8", optional = true}
 sha2 = {version = "0.9", optional = true}
 thiserror = "1"
+hpke = {version = "0.10.0", optional = true, default-features = false, features = ["std", "x25519"]}
 
-[dependencies.hpke]
+[dependencies.hpke-pq]
+package="hpke"
 git="https://github.com/bwesterb/rust-hpke"
 branch="xyber768d00"
 optional=true
 default-features=false
-features=["std"]
+features=["std", "x25519", "xyber768d00"]
 
 [build-dependencies]
 mozbuild = {version = "0.1", optional = true}

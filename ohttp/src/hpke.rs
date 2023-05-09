@@ -27,10 +27,18 @@ macro_rules! convert_enum {
     }
 }
 
+#[cfg(feature = "rust-hpke-pq")]
 convert_enum! {
 pub enum Kem {
     X25519Sha256 = 32,
     X25519Kyber768Draft00 = 48,
+}
+}
+
+#[cfg(not(feature = "rust-hpke-pq"))]
+convert_enum! {
+pub enum Kem {
+    X25519Sha256 = 32,
 }
 }
 
@@ -39,6 +47,8 @@ impl Kem {
     pub fn n_enc(self) -> usize {
         match self {
             Kem::X25519Sha256 => 32,
+
+            #[cfg(feature = "rust-hpke-pq")]
             Kem::X25519Kyber768Draft00 => 1120,
         }
     }
@@ -47,6 +57,8 @@ impl Kem {
     pub fn n_pk(self) -> usize {
         match self {
             Kem::X25519Sha256 => 32,
+
+            #[cfg(feature = "rust-hpke-pq")]
             Kem::X25519Kyber768Draft00 => 1216,
         }
     }
