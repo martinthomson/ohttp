@@ -35,7 +35,8 @@ hpke = {version = "0.10.0", optional = true, default-features = false, features 
 [dependencies.hpke-pq]
 package="hpke"
 git="https://github.com/bwesterb/rust-hpke"
-branch="xyber768d00"
+#branch="xyber768d00"
+rev="71efb5cb88d8798ccd1aea09a2c6bf003b0f7f72"
 optional=true
 default-features=false
 features=["std", "x25519", "xyber768d00"]
