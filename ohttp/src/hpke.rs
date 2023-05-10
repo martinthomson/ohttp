@@ -13,7 +13,9 @@ macro_rules! convert_enum {
 
             fn try_from(v: u16) -> Result<Self, Self::Error> {
                 match v {
-                    $(x if x == $name::$vname as u16 => Ok($name::$vname),)*
+                    $($(#[$vmeta])*
+                      x if x == $name::$vname as u16
+                      => Ok($name::$vname),)*
                     _ => Err(crate::Error::Unsupported),
                 }
             }
@@ -27,18 +29,12 @@ macro_rules! convert_enum {
     }
 }
 
-#[cfg(feature = "rust-hpke-pq")]
 convert_enum! {
 pub enum Kem {
     X25519Sha256 = 32,
-    X25519Kyber768Draft00 = 48,
-}
-}
 
-#[cfg(not(feature = "rust-hpke-pq"))]
-convert_enum! {
-pub enum Kem {
-    X25519Sha256 = 32,
+    #[cfg(feature = "rust-hpke-pq")]
+    X25519Kyber768Draft00 = 48,
 }
 }
 

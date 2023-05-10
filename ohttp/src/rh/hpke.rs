@@ -221,7 +221,7 @@ impl HpkeS {
 
         macro_rules! dispatch_hpkes_new {
             {
-                ($c:expr, $pk:expr, $csprng:expr): [$({
+                ($c:expr, $pk:expr, $csprng:expr): [$( $(#[$meta:meta])* {
                     $kemid:path => $kem:path,
                     $kdfid:path => $kdf:path,
                     $aeadid:path => $aead:path,
@@ -230,6 +230,7 @@ impl HpkeS {
             } => {
                 match ($c, $pk) {
                     $(
+                        $(#[$meta])*
                         (
                             Config {
                                 kem: $kemid,
@@ -255,7 +256,6 @@ impl HpkeS {
             };
         }
 
-        #[cfg(feature = "rust-hpke-pq")]
         let (context, enc) = dispatch_hpkes_new! { (config, pk_r, &mut csprng): [
             {
                 Kem::X25519Sha256 => X25519HkdfSha256,
@@ -275,6 +275,8 @@ impl HpkeS {
                 SenderContextX25519HkdfSha256::HkdfSha256,
                 SenderContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305,
             },
+
+            #[cfg(feature = "rust-hpke-pq")]
             {
                 Kem::X25519Kyber768Draft00 => X25519Kyber768Draft00,
                 Kdf::HkdfSha256 => HkdfSha256,
@@ -283,28 +285,6 @@ impl HpkeS {
                 SenderContext::X25519Kyber768Draft00,
                 SenderContextX25519Kyber768Draft00::HkdfSha256,
                 SenderContextX25519Kyber768Draft00HkdfSha256::AesGcm128,
-            },
-        ]};
-
-        #[cfg(not(feature = "rust-hpke-pq"))]
-        let (context, enc) = dispatch_hpkes_new! { (config, pk_r, &mut csprng): [
-            {
-                Kem::X25519Sha256 => X25519HkdfSha256,
-                Kdf::HkdfSha256 => HkdfSha256,
-                Aead::Aes128Gcm => AesGcm128,
-                PublicKey::X25519,
-                SenderContext::X25519HkdfSha256,
-                SenderContextX25519HkdfSha256::HkdfSha256,
-                SenderContextX25519HkdfSha256HkdfSha256::AesGcm128,
-            },
-            {
-                Kem::X25519Sha256 => X25519HkdfSha256,
-                Kdf::HkdfSha256 => HkdfSha256,
-                Aead::ChaCha20Poly1305 => ChaCha20Poly1305,
-                PublicKey::X25519,
-                SenderContext::X25519HkdfSha256,
-                SenderContextX25519HkdfSha256::HkdfSha256,
-                SenderContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305,
             },
         ]};
 
@@ -460,7 +440,7 @@ impl HpkeR {
     ) -> Res<Self> {
         macro_rules! dispatch_hpker_new {
             {
-                ($c:ident, $sk:ident): [$({
+                ($c:ident, $sk:ident): [$( $(#[$meta:meta])* {
                     $kemid:path => $kem:path,
                     $kdfid:path => $kdf:path,
                     $aeadid:path => $aead:path,
@@ -469,6 +449,7 @@ impl HpkeR {
             } => {
                 match ($c, $sk) {
                     $(
+                        $(#[$meta])*
                         (
                             Config {
                                 kem: $kemid,
@@ -491,7 +472,6 @@ impl HpkeR {
                 }
             };
         }
-        #[cfg(feature = "rust-hpke-pq")]
         let context = dispatch_hpker_new! {(config, sk_r): [
             {
                 Kem::X25519Sha256 => X25519HkdfSha256,
@@ -511,6 +491,8 @@ impl HpkeR {
                 ReceiverContextX25519HkdfSha256::HkdfSha256,
                 ReceiverContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305,
             },
+
+            #[cfg(feature = "rust-hpke-pq")]
             {
                 Kem::X25519Kyber768Draft00 => X25519Kyber768Draft00,
                 Kdf::HkdfSha256 => HkdfSha256,
@@ -522,27 +504,6 @@ impl HpkeR {
             },
         ]};
 
-        #[cfg(not(feature = "rust-hpke-pq"))]
-        let context = dispatch_hpker_new! {(config, sk_r): [
-            {
-                Kem::X25519Sha256 => X25519HkdfSha256,
-                Kdf::HkdfSha256 => HkdfSha256,
-                Aead::Aes128Gcm => AesGcm128,
-                PrivateKey::X25519,
-                ReceiverContext::X25519HkdfSha256,
-                ReceiverContextX25519HkdfSha256::HkdfSha256,
-                ReceiverContextX25519HkdfSha256HkdfSha256::AesGcm128,
-            },
-            {
-                Kem::X25519Sha256 => X25519HkdfSha256,
-                Kdf::HkdfSha256 => HkdfSha256,
-                Aead::ChaCha20Poly1305 => ChaCha20Poly1305,
-                PrivateKey::X25519,
-                ReceiverContext::X25519HkdfSha256,
-                ReceiverContextX25519HkdfSha256::HkdfSha256,
-                ReceiverContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305,
-            },
-        ]};
         Ok(Self { context, config })
     }
 
