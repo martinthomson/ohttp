@@ -14,9 +14,6 @@ mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
 
-#[cfg(all(featuer = "rust-hpke-pq", feature = "rust-hpke-nopq"))]
-compile_error!("Can't use rust-hpke-pq and rust-hpke-nopq at the same time");
-
 pub use err::Error;
 
 use crate::hpke::{Aead as AeadId, Kdf, Kem};

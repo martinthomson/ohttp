@@ -9,13 +9,12 @@ description = "Oblivious HTTP"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
-default = ["client", "server", "rust-hpke-nopq"]
+default = ["client", "server", "rust-hpke"]
 client = []
 server = []
 nss = ["bindgen"]
-rust-hpke-nopq = ["rust-hpke", "hpke"]
-rust-hpke-pq = ["rust-hpke", "hpke-pq"]
-rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2"]
+pq = ["hpke-pq"]
+rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke"]
 gecko = ["mozbuild"]
 
 [dependencies]
