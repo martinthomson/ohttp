@@ -53,7 +53,7 @@ impl<T> ReadSeek for io::BufReader<T> where T: io::Read + io::Seek {}
 #[cfg(any(feature = "read-bhttp", feature = "write-bhttp"))]
 pub enum Mode {
     KnownLength,
-    IndefiniteLength,
+    IndeterminateLength,
 }
 
 pub struct Field {
@@ -463,8 +463,8 @@ impl ControlData {
         match (self, mode) {
             (Self::Request { .. }, Mode::KnownLength) => 0,
             (Self::Response(_), Mode::KnownLength) => 1,
-            (Self::Request { .. }, Mode::IndefiniteLength) => 2,
-            (Self::Response(_), Mode::IndefiniteLength) => 3,
+            (Self::Request { .. }, Mode::IndeterminateLength) => 2,
+            (Self::Response(_), Mode::IndeterminateLength) => 3,
         }
     }
 
@@ -734,7 +734,7 @@ impl Message {
         let request = t == 0 || t == 2;
         let mode = match t {
             0 | 1 => Mode::KnownLength,
-            2 | 3 => Mode::IndefiniteLength,
+            2 | 3 => Mode::IndeterminateLength,
             _ => return Err(Error::InvalidMode),
         };
 
@@ -748,7 +748,7 @@ impl Message {
         let header = FieldSection::read_bhttp(mode, r)?;
 
         let mut content = read_vec(r)?.unwrap_or_default();
-        if mode == Mode::IndefiniteLength && !content.is_empty() {
+        if mode == Mode::IndeterminateLength && !content.is_empty() {
             loop {
                 let mut extra = read_vec(r)?.unwrap_or_default();
                 if extra.is_empty() {
@@ -779,7 +779,7 @@ impl Message {
         self.header.write_bhttp(mode, w)?;
 
         write_vec(&self.content, w)?;
-        if mode == Mode::IndefiniteLength && !self.content.is_empty() {
+        if mode == Mode::IndeterminateLength && !self.content.is_empty() {
             write_len(0, w)?;
         }
         self.trailer.write_bhttp(mode, w)?;

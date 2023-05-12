@@ -46,9 +46,9 @@ struct Args {
     #[structopt(long, short = "b")]
     binary: bool,
 
-    /// When creating message/bhttp, use the indefinite-length form.
-    #[structopt(long, short = "n")]
-    indefinite: bool,
+    /// When creating message/bhttp, use the indeterminate-length form.
+    #[structopt(long, short = "n", alias = "indefinite")]
+    indeterminate: bool,
 
     /// Enable override for the trust store.
     #[structopt(long)]
@@ -57,8 +57,8 @@ struct Args {
 
 impl Args {
     fn mode(&self) -> Mode {
-        if self.indefinite {
-            Mode::IndefiniteLength
+        if self.indeterminate {
+            Mode::IndeterminateLength
         } else {
             Mode::KnownLength
         }
