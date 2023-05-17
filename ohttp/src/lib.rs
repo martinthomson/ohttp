@@ -297,11 +297,8 @@ pub struct ClientRequest {
 
 #[cfg(feature = "client")]
 impl ClientRequest {
-    /// Reads an encoded configuration and constructs a single use client sender.
-    /// See `KeyConfig::encode` for the structure details.
-    #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
-    pub fn new(encoded_config: &[u8]) -> Res<Self> {
-        let mut config = KeyConfig::decode(encoded_config)?;
+    /// Construct a ClientRequest from a specific KeyConfig instance.
+    pub fn new_from_config(mut config: KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
 
@@ -312,6 +309,24 @@ impl ClientRequest {
         let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
         debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
         Ok(Self { hpke, header })
+    }
+
+    /// Reads an encoded configuration and constructs a single use client sender.
+    /// See `KeyConfig::encode` for the structure details.
+    #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
+    pub fn new(encoded_config: &[u8]) -> Res<Self> {
+        let config = KeyConfig::decode(encoded_config)?;
+        Self::new_from_config(config)
+    }
+
+    /// Reads an encoded list of configurations and constructs a single use client sender
+    /// from the first supported configuration.
+    /// See `KeyConfig::encode` for the structure details.
+    #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
+    pub fn new_from_config_list(encoded_config_list: &[u8]) -> Res<Self> {
+        let mut configs = KeyConfig::decode_list(encoded_config_list)?;
+        let config = configs.pop().unwrap();
+        Self::new_from_config(config)
     }
 
     /// Encapsulate a request.  This consumes this object.
