@@ -297,7 +297,7 @@ pub struct ClientRequest {
 
 #[cfg(feature = "client")]
 impl ClientRequest {
-    /// Construct a ClientRequest from a specific KeyConfig instance.
+    /// Construct a `ClientRequest` from a specific `KeyConfig` instance.
     pub fn new_from_config(mut config: KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
@@ -325,7 +325,10 @@ impl ClientRequest {
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
     pub fn new_from_config_list(encoded_config_list: &[u8]) -> Res<Self> {
         let mut configs = KeyConfig::decode_list(encoded_config_list)?;
-        let config = configs.pop().unwrap();
+        let config = match configs.pop() {
+            Some(c) => c,
+            None => return Err(Error::Unsupported),
+        };
         Self::new_from_config(config)
     }
 
