@@ -323,7 +323,7 @@ impl ClientRequest {
     /// from the first supported configuration.
     /// See `KeyConfig::encode` for the structure details.
     #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
-    pub fn new_from_config_list(encoded_config_list: &[u8]) -> Res<Self> {
+    pub fn from_config_list(encoded_config_list: &[u8]) -> Res<Self> {
         let mut configs = KeyConfig::decode_list(encoded_config_list)?;
         let config = match configs.pop() {
             Some(c) => c,
