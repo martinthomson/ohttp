@@ -734,7 +734,7 @@ mod test {
     }
 
     #[test]
-    fn test_request_from_config_list() {
+    fn request_from_config_list() {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
