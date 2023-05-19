@@ -297,11 +297,8 @@ pub struct ClientRequest {
 
 #[cfg(feature = "client")]
 impl ClientRequest {
-    /// Reads an encoded configuration and constructs a single use client sender.
-    /// See `KeyConfig::encode` for the structure details.
-    #[allow(clippy::similar_names)] // for `sk_s` and `pk_s`
-    pub fn new(encoded_config: &[u8]) -> Res<Self> {
-        let mut config = KeyConfig::decode(encoded_config)?;
+    /// Construct a `ClientRequest` from a specific `KeyConfig` instance.
+    pub fn from_config(mut config: KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
 
@@ -312,6 +309,25 @@ impl ClientRequest {
         let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
         debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
         Ok(Self { hpke, header })
+    }
+
+    /// Reads an encoded configuration and constructs a single use client sender.
+    /// See `KeyConfig::decode` for the structure details.
+    pub fn from_encoded_config(encoded_config: &[u8]) -> Res<Self> {
+        let config = KeyConfig::decode(encoded_config)?;
+        Self::from_config(config)
+    }
+
+    /// Reads an encoded list of configurations and constructs a single use client sender
+    /// from the first supported configuration.
+    /// See `KeyConfig::decode_list` for the structure details.
+    pub fn from_encoded_config_list(encoded_config_list: &[u8]) -> Res<Self> {
+        let mut configs = KeyConfig::decode_list(encoded_config_list)?;
+        let config = match configs.pop() {
+            Some(c) => c,
+            None => return Err(Error::Unsupported),
+        };
+        Self::from_config(config)
     }
 
     /// Encapsulate a request.  This consumes this object.
@@ -537,7 +553,7 @@ mod test {
         let encoded_config = server.config().encode().unwrap();
         trace!("Config: {}", hex::encode(&encoded_config));
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
         trace!("Request: {}", hex::encode(REQUEST));
         trace!("Encapsulated Request: {}", hex::encode(&enc_request));
@@ -561,9 +577,9 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client1 = ClientRequest::new(&encoded_config).unwrap();
+        let client1 = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request1, client_response1) = client1.encapsulate(REQUEST).unwrap();
-        let client2 = ClientRequest::new(&encoded_config).unwrap();
+        let client2 = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request2, client_response2) = client2.encapsulate(REQUEST).unwrap();
         assert_ne!(enc_request1, enc_request2);
 
@@ -601,7 +617,7 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request, _) = client.encapsulate(REQUEST).unwrap();
 
         let res = server.decapsulate(&enc_request[..cut]);
@@ -632,7 +648,7 @@ mod test {
         let mut server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
-        let client = ClientRequest::new(&encoded_config).unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
 
         let (request, server_response) = server.decapsulate(&enc_request).unwrap();
@@ -715,6 +731,33 @@ mod test {
 
         // Check that truncation errors in `KeyConfig::decode` are caught.
         assert!(KeyConfig::decode_list(&buf[..buf.len() - 3]).is_err());
+    }
+
+    #[test]
+    fn request_from_config_list() {
+        init();
+
+        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let mut server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+
+        let mut header: [u8; 2] = [0; 2];
+        header[0] = u8::try_from((encoded_config.len() & 0xFF00) >> 8).unwrap();
+        header[1] = u8::try_from(encoded_config.len() & 0xFF).unwrap();
+        let mut encoded_config_list = Vec::new();
+        encoded_config_list.extend(header.to_vec());
+        encoded_config_list.extend(encoded_config);
+
+        let client = ClientRequest::from_encoded_config_list(&encoded_config_list).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
     }
 
     #[test]

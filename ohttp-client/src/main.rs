@@ -91,7 +91,7 @@ async fn main() -> Res<()> {
 
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
-    let ohttp_request = ohttp::ClientRequest::new(&args.config)?;
+    let ohttp_request = ohttp::ClientRequest::from_encoded_config_list(&args.config)?;
     let (enc_request, ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 

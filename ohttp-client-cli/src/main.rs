@@ -14,7 +14,7 @@ fn main() {
     let mut cfg = String::new();
     input.read_line(&mut cfg).unwrap();
     let config = hex::decode(cfg.trim()).unwrap();
-    let client = ClientRequest::new(&config).unwrap();
+    let client = ClientRequest::from_encoded_config(&config).unwrap();
 
     println!("Request (HTTP/1.1, terminate with \"END\"):");
     io::stdout().flush().unwrap();
