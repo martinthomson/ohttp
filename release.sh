@@ -14,9 +14,10 @@ trap 'echo "*** release failed"; exit 1' ERR
 
 v="${1#v}"
 find . -path ./target -prune -o -name Cargo.toml -exec sed -i -e '/^\[package\]/,/^\[/{s/^version = ".*"/version = "'"$v"'"/;}' {} \+
-find . -path ./target -prune -o -name Cargo.toml -exec git commit -m "Update version to $v" {} \+
-git tag -m "Tag release $v" "v$v"
+find . -path ./target -prune -o -name Cargo.toml -exec git commit -m "Update version to $v" {} \+ || \
+    echo "--- Version numbers already updated."
 git push origin main
+git tag -m "Tag release $v" "v$v"
 git push origin "v$v"
 cargo publish -p ohttp
 cargo publish -p bhttp
