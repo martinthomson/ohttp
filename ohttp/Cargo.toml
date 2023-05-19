@@ -1,6 +1,6 @@
 [package]
 name = "ohttp"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 build = "build.rs"
