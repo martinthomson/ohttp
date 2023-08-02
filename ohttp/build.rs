@@ -217,7 +217,7 @@ mod nss {
             dynamic_libs.append(&mut nspr_libs());
         }
 
-        if env::consts::OS != "macos" {
+        if cfg!(not(feature = "external-sqlite")) && env::consts::OS != "macos" {
             static_libs.push("sqlite");
         }
 
@@ -225,7 +225,7 @@ mod nss {
         if env::consts::OS != "windows" {
             dynamic_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
         }
-        if env::consts::OS == "macos" {
+        if cfg!(not(feature = "external-sqlite")) && env::consts::OS == "macos" {
             dynamic_libs.push("sqlite3");
         }
 
@@ -462,10 +462,48 @@ mod nss {
         unreachable!()
     }
 
+    #[cfg(feature = "app-svc")]
+    fn setup_for_app_svc() -> Vec<String> {
+        // Locate the NSS libraries that application_services is using.
+        // NOTE: This directory has a slightly different layout than then normal
+        //       'dist' directory that NSS builds output.
+        let nss_dir = nss_dir().expect("NSS_DIR env must be set for app_svc builds");
+        if !nss_dir.exists() {
+            eprintln!(
+                "NSS_DIR path (obtained via `env`) does not exist: {}",
+                nss_dir.display()
+            );
+            panic!("It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!");
+        }
+
+        let lib_dir = nss_dir.join("lib");
+        println!(
+            "cargo:rustc-link-search=native={}",
+            lib_dir.to_string_lossy()
+        );
+
+        // For app_svc builds, we use static linking of NSS.
+        let use_static_softoken = true;
+        let use_static_nspr = true;
+        static_link(&lib_dir, use_static_softoken, use_static_nspr);
+
+        let include_dir = nss_dir.join("include");
+        println!("cargo:include={}", include_dir.to_string_lossy());
+
+        vec![String::from("-I") + &include_dir.join("nss").to_string_lossy()]
+    }
+
+    #[cfg(not(feature = "app-svc"))]
+    fn setup_for_app_svc() -> Vec<String> {
+        unreachable!()
+    }
+
     pub fn build() {
         println!("cargo:rerun-if-env-changed=NSS_DIR");
         let flags = if cfg!(feature = "gecko") {
             setup_for_gecko()
+        } else if cfg!(feature = "app-svc") {
+            setup_for_app_svc()
         } else {
             nss_dir().map_or_else(pkg_config, |nss| build_nss(&nss))
         };
