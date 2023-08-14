@@ -153,23 +153,59 @@ mod nss {
         }
     }
 
-    fn static_link() {
+    fn static_softoken_libs(nsslibdir: &Path) -> Vec<&'static str> {
+        let mut static_libs = vec!["pk11wrap_static", "softokn_static", "freebl_static"];
+
+        // NSS optionally builds platform-specific acceleration libraries as
+        // separate static libraries.
+        let accel_libs = &[
+            "gcm-aes-x86_c_lib",
+            "sha-x86_c_lib",
+            "hw-acc-crypto-avx",
+            "hw-acc-crypto-avx2",
+            "armv8_c_lib",
+            "gcm-aes-arm32-neon_c_lib",
+            "gcm-aes-aarch64_c_lib",
+            // NOTE: The intel-gcm-* libraries are already automatically
+            //       included in freebl_static as source files.
+        ];
+
+        // Build rules are complex, so simply check the lib directory to see if
+        // any of the accelerator libraries were built to decide what to
+        // include. Check different variations of the filename to handle
+        // platform differences.
+        for libname in accel_libs {
+            let filename = if env::consts::OS == "windows" {
+                format!("{libname}.lib")
+            } else {
+                format!("lib{libname}.a")
+            };
+            if nsslibdir.join(filename).is_file() {
+                static_libs.push(libname);
+            }
+        }
+
+        static_libs
+    }
+
+    fn static_link(nsslibdir: &Path, use_static_softoken: bool) {
         let mut static_libs = vec![
             "certdb",
             "certhi",
             "cryptohi",
-            "freebl",
             "nss_static",
             "nssb",
             "nssdev",
             "nsspki",
             "nssutil",
-            "pk11wrap",
-            "pkcs12",
-            "pkcs7",
-            "smime",
-            "softokn_static",
         ];
+        if use_static_softoken {
+            // Statically link pk11/softokn/freebl
+            static_libs.append(&mut static_softoken_libs(nsslibdir));
+        } else {
+            // Use dlopen to get softokn3.so
+            static_libs.push("pk11wrap");
+        }
         if env::consts::OS != "macos" {
             static_libs.push("sqlite");
         }
@@ -275,7 +311,8 @@ mod nss {
             nsslibdir.to_str().unwrap()
         );
         if is_debug() {
-            static_link();
+            let use_static_softoken = false;
+            static_link(&nsslibdir, use_static_softoken);
         } else {
             dynamic_link();
         }
