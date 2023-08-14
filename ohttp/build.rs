@@ -133,22 +133,24 @@ mod nss {
         assert!(status.success(), "NSS build failed");
     }
 
-    fn dynamic_link() {
-        let libs = if env::consts::OS == "windows" {
-            &["nssutil3.dll", "nss3.dll"]
+    fn nspr_libs() -> Vec<&'static str> {
+        if env::consts::OS == "windows" {
+            vec!["libplds4", "libplc4", "libnspr4"]
         } else {
-            &["nssutil3", "nss3"]
-        };
-        dynamic_link_both(libs);
+            vec!["plds4", "plc4", "nspr4"]
+        }
     }
 
-    fn dynamic_link_both(extra_libs: &[&str]) {
-        let nspr_libs = if env::consts::OS == "windows" {
-            &["libplds4", "libplc4", "libnspr4"]
+    fn dynamic_link() {
+        let mut libs = if env::consts::OS == "windows" {
+            vec!["nssutil3.dll", "nss3.dll"]
         } else {
-            &["plds4", "plc4", "nspr4"]
+            vec!["nssutil3", "nss3"]
         };
-        for lib in nspr_libs.iter().chain(extra_libs) {
+
+        libs.append(&mut nspr_libs());
+
+        for lib in &libs {
             println!("cargo:rustc-link-lib=dylib={}", lib);
         }
     }
@@ -188,7 +190,7 @@ mod nss {
         static_libs
     }
 
-    fn static_link(nsslibdir: &Path, use_static_softoken: bool) {
+    fn static_link(nsslibdir: &Path, use_static_softoken: bool, use_static_nspr: bool) {
         let mut static_libs = vec![
             "certdb",
             "certhi",
@@ -199,6 +201,8 @@ mod nss {
             "nsspki",
             "nssutil",
         ];
+        let mut dynamic_libs = vec![];
+
         if use_static_softoken {
             // Statically link pk11/softokn/freebl
             static_libs.append(&mut static_softoken_libs(nsslibdir));
@@ -206,22 +210,31 @@ mod nss {
             // Use dlopen to get softokn3.so
             static_libs.push("pk11wrap");
         }
+
+        if use_static_nspr {
+            static_libs.append(&mut nspr_libs());
+        } else {
+            dynamic_libs.append(&mut nspr_libs());
+        }
+
         if env::consts::OS != "macos" {
             static_libs.push("sqlite");
         }
-        for lib in static_libs {
-            println!("cargo:rustc-link-lib=static={}", lib);
-        }
 
         // Dynamic libs that aren't transitively included by NSS libs.
-        let mut other_libs = Vec::new();
         if env::consts::OS != "windows" {
-            other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
+            dynamic_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
         }
         if env::consts::OS == "macos" {
-            other_libs.push("sqlite3");
+            dynamic_libs.push("sqlite3");
         }
-        dynamic_link_both(&other_libs);
+
+        for lib in &static_libs {
+            println!("cargo:rustc-link-lib=static={}", lib);
+        }
+        for lib in &dynamic_libs {
+            println!("cargo:rustc-link-lib=dylib={}", lib);
+        }
     }
 
     fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -312,7 +325,8 @@ mod nss {
         );
         if is_debug() {
             let use_static_softoken = false;
-            static_link(&nsslibdir, use_static_softoken);
+            let use_static_nspr = false;
+            static_link(&nsslibdir, use_static_softoken, use_static_nspr);
         } else {
             dynamic_link();
         }
