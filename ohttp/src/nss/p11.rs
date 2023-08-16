@@ -240,7 +240,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
         };
         Self {
             item,
-            marker: PhantomData::default(),
+            marker: PhantomData,
         }
     }
 
