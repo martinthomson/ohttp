@@ -324,8 +324,8 @@ mod nss {
             nsslibdir.to_str().unwrap()
         );
         if is_debug() {
-            let use_static_softoken = false;
-            let use_static_nspr = false;
+            let use_static_softoken = true;
+            let use_static_nspr = true;
             static_link(&nsslibdir, use_static_softoken, use_static_nspr);
         } else {
             dynamic_link();
