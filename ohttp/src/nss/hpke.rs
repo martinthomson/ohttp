@@ -86,6 +86,8 @@ impl HpkeContext {
     }
 }
 
+unsafe impl Send for HpkeContext {}
+
 impl Exporter for HpkeContext {
     fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
         let mut out: *mut sys::PK11SymKey = null_mut();
@@ -290,7 +292,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
 
 #[cfg(test)]
 mod test {
-    use super::{generate_key_pair, Config, HpkeR, HpkeS};
+    use super::{generate_key_pair, Config, HpkeContext, HpkeR, HpkeS};
     use crate::{hpke::Aead, init};
 
     const INFO: &[u8] = b"info";
@@ -337,5 +339,20 @@ mod test {
     #[test]
     fn seal_open_chacha() {
         seal_open(Aead::ChaCha20Poly1305);
+    }
+
+    #[test]
+    fn send_hpkecontext() {
+        use std::{sync::mpsc, thread};
+
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let context = HpkeContext::new(Config::default());
+            tx.send(context).unwrap();
+        });
+
+        let context = rx.recv().unwrap();
+        drop(context);
     }
 }
