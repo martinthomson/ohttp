@@ -113,7 +113,7 @@ async fn main() -> Res<()> {
         ],
     )?;
     let ohttp = OhttpServer::new(config)?;
-    println!("Config: {}", hex::encode(ohttp.config().encode()?));
+    println!("Config: {}", hex::encode(KeyConfig::encode_list(&[ohttp.config()])?));
     let mode = args.mode();
 
     let filter = warp::post()

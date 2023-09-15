@@ -5,6 +5,7 @@
     allow(dead_code, unused_imports)
 )]
 
+mod config;
 mod err;
 pub mod hpke;
 #[cfg(feature = "nss")]
@@ -14,39 +15,40 @@ mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
 
-pub use err::Error;
+pub use crate::{
+    config::{KeyConfig, SymmetricSuite},
+    err::Error,
+};
 
-use crate::hpke::{Aead as AeadId, Kdf, Kem};
+use crate::{
+    err::Res,
+    hpke::{Aead as AeadId, Kdf, Kem},
+};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use err::Res;
 use log::trace;
 use std::{
     cmp::max,
     convert::TryFrom,
-    io::{BufRead, BufReader, Cursor, Read},
+    io::{BufReader, Read},
     mem::size_of,
 };
 
 #[cfg(feature = "nss")]
-use nss::random;
+use crate::nss::random;
 #[cfg(feature = "nss")]
-use nss::{
+use crate::nss::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
-    hpke::{generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS},
-    PrivateKey, PublicKey,
+    hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
 };
 
 #[cfg(feature = "rust-hpke")]
 use crate::rand::random;
 #[cfg(feature = "rust-hpke")]
-use rh::{
+use crate::rh::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
-    hpke::{
-        derive_key_pair, generate_key_pair, Config as HpkeConfig, Exporter, HpkeR, HpkeS,
-        PrivateKey, PublicKey,
-    },
+    hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
 };
 
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
@@ -64,214 +66,6 @@ pub type KeyId = u8;
 pub fn init() {
     #[cfg(feature = "nss")]
     nss::init();
-}
-
-/// A tuple of KDF and AEAD identifiers.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct SymmetricSuite {
-    kdf: Kdf,
-    aead: AeadId,
-}
-
-impl SymmetricSuite {
-    #[must_use]
-    pub const fn new(kdf: Kdf, aead: AeadId) -> Self {
-        Self { kdf, aead }
-    }
-
-    #[must_use]
-    pub fn kdf(self) -> Kdf {
-        self.kdf
-    }
-
-    #[must_use]
-    pub fn aead(self) -> AeadId {
-        self.aead
-    }
-}
-
-/// The key configuration of a server.  This can be used by both client and server.
-/// An important invariant of this structure is that it does not include
-/// any combination of KEM, KDF, and AEAD that is not supported.
-pub struct KeyConfig {
-    key_id: KeyId,
-    kem: Kem,
-    symmetric: Vec<SymmetricSuite>,
-    sk: Option<PrivateKey>,
-    pk: PublicKey,
-}
-
-impl KeyConfig {
-    fn strip_unsupported(symmetric: &mut Vec<SymmetricSuite>, kem: Kem) {
-        symmetric.retain(|s| HpkeConfig::new(kem, s.kdf(), s.aead()).supported());
-    }
-
-    /// Construct a configuration for the server side.
-    /// # Panics
-    /// If the configurations don't include a supported configuration.
-    pub fn new(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
-        Self::strip_unsupported(&mut symmetric, kem);
-        assert!(!symmetric.is_empty());
-        let (sk, pk) = generate_key_pair(kem)?;
-        Ok(Self {
-            key_id,
-            kem,
-            symmetric,
-            sk: Some(sk),
-            pk,
-        })
-    }
-
-    /// Derive a configuration for the server side from input keying material,
-    /// using the `DeriveKeyPair` functionality of the HPKE KEM defined here:
-    /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4>
-    /// # Panics
-    /// If the configurations don't include a supported configuration.
-    #[allow(unused)]
-    pub fn derive(
-        key_id: u8,
-        kem: Kem,
-        mut symmetric: Vec<SymmetricSuite>,
-        ikm: &[u8],
-    ) -> Res<Self> {
-        #[cfg(feature = "rust-hpke")]
-        {
-            Self::strip_unsupported(&mut symmetric, kem);
-            assert!(!symmetric.is_empty());
-            let (sk, pk) = derive_key_pair(kem, ikm)?;
-            Ok(Self {
-                key_id,
-                kem,
-                symmetric,
-                sk: Some(sk),
-                pk,
-            })
-        }
-        #[cfg(not(feature = "rust-hpke"))]
-        {
-            Err(Error::Unsupported)
-        }
-    }
-
-    /// Encode into a wire format.  This shares a format with the core of ECH:
-    ///
-    /// ```tls-format
-    /// opaque HpkePublicKey[Npk];
-    /// uint16 HpkeKemId;  // Defined in I-D.irtf-cfrg-hpke
-    /// uint16 HpkeKdfId;  // Defined in I-D.irtf-cfrg-hpke
-    /// uint16 HpkeAeadId; // Defined in I-D.irtf-cfrg-hpke
-    ///
-    /// struct {
-    ///   HpkeKdfId kdf_id;
-    ///   HpkeAeadId aead_id;
-    /// } ECHCipherSuite;
-    ///
-    /// struct {
-    ///   uint8 key_id;
-    ///   HpkeKemId kem_id;
-    ///   HpkePublicKey public_key;
-    ///   ECHCipherSuite cipher_suites<4..2^16-4>;
-    /// } ECHKeyConfig;
-    /// ```
-    /// # Panics
-    /// Not as a result of this function.
-    pub fn encode(&self) -> Res<Vec<u8>> {
-        let mut buf = Vec::new();
-        buf.write_u8(self.key_id)?;
-        buf.write_u16::<NetworkEndian>(u16::from(self.kem))?;
-        let pk_buf = self.pk.key_data()?;
-        buf.extend_from_slice(&pk_buf);
-        buf.write_u16::<NetworkEndian>((self.symmetric.len() * 4).try_into()?)?;
-        for s in &self.symmetric {
-            buf.write_u16::<NetworkEndian>(u16::from(s.kdf()))?;
-            buf.write_u16::<NetworkEndian>(u16::from(s.aead()))?;
-        }
-        Ok(buf)
-    }
-
-    /// Construct a configuration from the encoded server configuration.
-    /// The format of `encoded_config` is the output of `Self::encode`.
-    pub fn decode(encoded_config: &[u8]) -> Res<Self> {
-        let end_position = u64::try_from(encoded_config.len())?;
-        let mut r = Cursor::new(encoded_config);
-        let key_id = r.read_u8()?;
-        let kem = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
-
-        // Note that the KDF and AEAD doesn't matter here.
-        let kem_config = HpkeConfig::new(kem, Kdf::HkdfSha256, AeadId::Aes128Gcm);
-        if !kem_config.supported() {
-            return Err(Error::Unsupported);
-        }
-        let mut pk_buf = vec![0; kem_config.kem().n_pk()];
-        r.read_exact(&mut pk_buf)?;
-
-        let sym_len = r.read_u16::<NetworkEndian>()?;
-        let mut sym = vec![0; usize::from(sym_len)];
-        r.read_exact(&mut sym)?;
-        if sym.is_empty() || (sym.len() % 4 != 0) {
-            return Err(Error::Format);
-        }
-        let sym_count = sym.len() / 4;
-        let mut sym_r = BufReader::new(&sym[..]);
-        let mut symmetric = Vec::with_capacity(sym_count);
-        for _ in 0..sym_count {
-            let kdf = Kdf::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
-            let aead = AeadId::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
-            symmetric.push(SymmetricSuite::new(kdf, aead));
-        }
-
-        // Check that there was nothing extra and we are at the end of the buffer.
-        if r.position() != end_position {
-            return Err(Error::Format);
-        }
-
-        Self::strip_unsupported(&mut symmetric, kem);
-        let pk = HpkeR::decode_public_key(kem_config.kem(), &pk_buf)?;
-
-        Ok(Self {
-            key_id,
-            kem,
-            symmetric,
-            sk: None,
-            pk,
-        })
-    }
-
-    /// Decode a list of key configurations.
-    /// This only returns the valid and supported key configurations;
-    /// unsupported configurations are dropped silently.
-    pub fn decode_list(encoded_list: &[u8]) -> Res<Vec<Self>> {
-        let end_position = u64::try_from(encoded_list.len())?;
-        let mut r = Cursor::new(encoded_list);
-        let mut configs = Vec::new();
-        loop {
-            if r.position() == end_position {
-                break;
-            }
-            let len = usize::from(r.read_u16::<NetworkEndian>()?);
-            let buf = r.fill_buf()?;
-            if len > buf.len() {
-                return Err(Error::Truncated);
-            }
-            let res = Self::decode(&buf[..len]);
-            r.consume(len);
-            match res {
-                Ok(config) => configs.push(config),
-                Err(Error::Unsupported) => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(configs)
-    }
-
-    fn select(&self, sym: SymmetricSuite) -> Res<HpkeConfig> {
-        if self.symmetric.contains(&sym) {
-            let config = HpkeConfig::new(self.kem, sym.kdf(), sym.aead());
-            Ok(config)
-        } else {
-            Err(Error::Unsupported)
-        }
-    }
 }
 
 /// Construct the info parameter we use to initialize an `HpkeS` instance.
@@ -518,13 +312,13 @@ impl ClientResponse {
 #[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
     use crate::{
+        config::SymmetricSuite,
         err::Res,
         hpke::{Aead, Kdf, Kem},
-        ClientRequest, Error, KeyConfig, KeyId, Server, SymmetricSuite,
+        ClientRequest, Error, KeyConfig, KeyId, Server,
     };
-    use byteorder::{NetworkEndian, WriteBytesExt};
     use log::trace;
-    use std::{fmt::Debug, io::ErrorKind, iter::zip};
+    use std::{fmt::Debug, io::ErrorKind};
 
     const KEY_ID: KeyId = 1;
     const KEM: Kem = Kem::X25519Sha256;
@@ -700,40 +494,6 @@ mod test {
     }
 
     #[test]
-    fn encode_decode_config_list() {
-        const COUNT: usize = 3;
-        init();
-
-        let mut configs = Vec::with_capacity(COUNT);
-        configs.resize_with(COUNT, || {
-            KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap()
-        });
-
-        let mut buf = Vec::new();
-        for c in &configs {
-            let mut encoded = c.encode().unwrap();
-            buf.write_u16::<NetworkEndian>(u16::try_from(encoded.len()).unwrap())
-                .unwrap();
-            buf.append(&mut encoded);
-        }
-
-        let decoded_list = KeyConfig::decode_list(&buf).unwrap();
-        for (original, decoded) in zip(&configs, &decoded_list) {
-            assert_eq!(decoded.key_id, original.key_id);
-            assert_eq!(decoded.kem, original.kem);
-            assert_eq!(
-                decoded.pk.key_data().unwrap(),
-                original.pk.key_data().unwrap()
-            );
-            assert!(decoded.sk.is_none());
-            assert!(original.sk.is_some());
-        }
-
-        // Check that truncation errors in `KeyConfig::decode` are caught.
-        assert!(KeyConfig::decode_list(&buf[..buf.len() - 3]).is_err());
-    }
-
-    #[test]
     fn request_from_config_list() {
         init();
 
@@ -760,67 +520,4 @@ mod test {
         assert_eq!(&response[..], RESPONSE);
     }
 
-    #[test]
-    fn empty_config_list() {
-        let list = KeyConfig::decode_list(&[]).unwrap();
-        assert!(list.is_empty());
-
-        // A reserved KEM ID is not bad.  Note that we don't check that the data
-        // following the KEM ID is even the minimum length, allowing this to be
-        // zero bytes, where you need at least some bytes in a public key and some
-        // bytes to identify at least one KDF and AEAD (i.e., more than 6 bytes).
-        let list = KeyConfig::decode_list(&[0, 3, 0, 0, 0]).unwrap();
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn bad_config_list_length() {
-        init();
-
-        // A one byte length for a config.
-        let res = KeyConfig::decode_list(&[0]);
-        assert!(matches!(res, Err(Error::Io(_))));
-    }
-
-    #[test]
-    fn decode_bad_config() {
-        init();
-
-        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
-            .unwrap()
-            .encode()
-            .unwrap();
-        {
-            // Truncation tests.
-            let trunc = |n: usize| KeyConfig::decode(&x25519[..n]);
-
-            // x25519, truncated inside the KEM ID.
-            assert!(matches!(trunc(2), Err(Error::Io(_))));
-            // ... inside the public key.
-            assert!(matches!(trunc(4), Err(Error::Io(_))));
-            // ... inside the length of the KDF+AEAD list.
-            assert!(matches!(trunc(36), Err(Error::Io(_))));
-            // ... inside the KDF+AEAD list.
-            assert!(matches!(trunc(38), Err(Error::Io(_))));
-        }
-
-        // And then with an extra byte at the end.
-        x25519.push(0);
-        assert!(matches!(KeyConfig::decode(&x25519), Err(Error::Format)));
-    }
-
-    /// Truncate the KDF+AEAD list badly.
-    #[test]
-    fn truncate_kdf_aead_list() {
-        init();
-
-        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
-            .unwrap()
-            .encode()
-            .unwrap();
-        x25519.truncate(38);
-        assert_eq!(usize::from(x25519[36]), SYMMETRIC.len() * 4);
-        x25519[36] = 1;
-        assert!(matches!(KeyConfig::decode(&x25519), Err(Error::Format)));
-    }
 }

@@ -29,7 +29,7 @@ serves responses to `POST` requests at a path of `/`; anything else gets 406 or
 When it starts up the server prints a single line like this:
 
 ```
-Config: 000020dee0e3602cf94dc19d9e1a7bcaa508044355a0635e127dcb8473b58641c5671a002000080001000100010003
+Config: 002d0000200109ed5f13a5eb012834f66cd133f114f143f0e3f7b899dc3f9dbfee9668496800080001000100010003
 ```
 
 This is needed by the client, see below.
@@ -47,7 +47,7 @@ The client takes two arguments:
 ```
 cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
   'https://localhost:9443/' -i ./examples/request.txt \
-  000020dee0e3602cf94dc19d9e1a7bcaa508044355a0635e127dcb8473b58641c5671a002000080001000100010003
+  002d0000200109ed5f13a5eb012834f66cd133f114f143f0e3f7b899dc3f9dbfee9668496800080001000100010003
 ```
 
 The client needs to be told about the CA file that the script above created or
