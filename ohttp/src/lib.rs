@@ -519,5 +519,4 @@ mod test {
         let response = client_response.decapsulate(&enc_response).unwrap();
         assert_eq!(&response[..], RESPONSE);
     }
-
 }
