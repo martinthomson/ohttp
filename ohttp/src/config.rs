@@ -47,6 +47,7 @@ impl SymmetricSuite {
 /// The key configuration of a server.  This can be used by both client and server.
 /// An important invariant of this structure is that it does not include
 /// any combination of KEM, KDF, and AEAD that is not supported.
+#[allow(clippy::module_name_repetitions)]
 pub struct KeyConfig {
     pub(crate) key_id: KeyId,
     pub(crate) kem: Kem,
@@ -112,6 +113,9 @@ impl KeyConfig {
     /// This produces the key configuration format that is used for
     /// the "application/ohttp-keys" media type.
     /// Each item in the list is written as per [`encode()`].
+    ///
+    /// # Panics
+    /// Not as a result of this function.
     ///
     /// [`encode()`]: Self::encode
     pub fn encode_list(list: &[impl AsRef<Self>]) -> Res<Vec<u8>> {
