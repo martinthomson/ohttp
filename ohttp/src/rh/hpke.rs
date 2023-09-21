@@ -66,6 +66,7 @@ impl Default for Config {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum PublicKey {
     X25519(<X25519HkdfSha256 as KemTrait>::PublicKey),
 
@@ -96,6 +97,7 @@ impl std::fmt::Debug for PublicKey {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum PrivateKey {
     X25519(<X25519HkdfSha256 as KemTrait>::PrivateKey),
 

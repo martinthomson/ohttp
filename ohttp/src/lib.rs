@@ -149,6 +149,7 @@ impl ClientRequest {
 /// It holds a single key pair and can generate a configuration.
 /// (A more complex server would have multiple key pairs. This is simple.)
 #[cfg(feature = "server")]
+#[derive(Debug, Clone)]
 pub struct Server {
     config: KeyConfig,
 }
