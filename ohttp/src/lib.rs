@@ -173,7 +173,7 @@ impl Server {
     /// # Panics
     /// Not as a consequence of this code, but Rust won't know that for sure.
     #[allow(clippy::similar_names)] // for kem_id and key_id
-    pub fn decapsulate(&mut self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
+    pub fn decapsulate(&self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
         if enc_request.len() < REQUEST_HEADER_LEN {
             return Err(Error::Truncated);
         }
@@ -201,7 +201,7 @@ impl Server {
         let mut hpke = HpkeR::new(
             cfg,
             &self.config.pk,
-            self.config.sk.as_mut().unwrap(),
+            self.config.sk.as_ref().unwrap(),
             &enc,
             &info,
         )?;
@@ -343,7 +343,7 @@ mod test {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
-        let mut server = Server::new(server_config).unwrap();
+        let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
         trace!("Config: {}", hex::encode(&encoded_config));
 
@@ -368,7 +368,7 @@ mod test {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
-        let mut server = Server::new(server_config).unwrap();
+        let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
         let client1 = ClientRequest::from_encoded_config(&encoded_config).unwrap();
@@ -408,7 +408,7 @@ mod test {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
-        let mut server = Server::new(server_config).unwrap();
+        let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
@@ -439,7 +439,7 @@ mod test {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
-        let mut server = Server::new(server_config).unwrap();
+        let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
@@ -498,7 +498,7 @@ mod test {
         init();
 
         let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
-        let mut server = Server::new(server_config).unwrap();
+        let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
         let mut header: [u8; 2] = [0; 2];

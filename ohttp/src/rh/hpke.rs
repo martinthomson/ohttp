@@ -434,7 +434,7 @@ impl HpkeR {
     pub fn new(
         config: Config,
         _pk_r: &PublicKey,
-        sk_r: &mut PrivateKey,
+        sk_r: &PrivateKey,
         enc: &[u8],
         info: &[u8],
     ) -> Res<Self> {
