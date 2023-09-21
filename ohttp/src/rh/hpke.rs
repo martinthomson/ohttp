@@ -66,6 +66,7 @@ impl Default for Config {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum PublicKey {
     X25519(<X25519HkdfSha256 as KemTrait>::PublicKey),
 
@@ -96,6 +97,7 @@ impl std::fmt::Debug for PublicKey {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 pub enum PrivateKey {
     X25519(<X25519HkdfSha256 as KemTrait>::PrivateKey),
 
@@ -434,7 +436,7 @@ impl HpkeR {
     pub fn new(
         config: Config,
         _pk_r: &PublicKey,
-        sk_r: &mut PrivateKey,
+        sk_r: &PrivateKey,
         enc: &[u8],
         info: &[u8],
     ) -> Res<Self> {
@@ -608,9 +610,9 @@ mod test {
     fn make() {
         init();
         let cfg = Config::default();
-        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let (sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
         let hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
-        let _hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
+        let _hpke_r = HpkeR::new(cfg, &pk_r, &sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
     }
 
     #[allow(clippy::similar_names)] // for sk_x and pk_x
@@ -623,7 +625,7 @@ mod test {
             ..Config::default()
         };
         assert!(cfg.supported());
-        let (mut sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let (sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
         let mut hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
@@ -631,7 +633,7 @@ mod test {
         let ct = hpke_s.seal(AAD, PT).unwrap();
 
         // Receive
-        let mut hpke_r = HpkeR::new(cfg, &pk_r, &mut sk_r, &enc, INFO).unwrap();
+        let mut hpke_r = HpkeR::new(cfg, &pk_r, &sk_r, &enc, INFO).unwrap();
         let pt = hpke_r.open(AAD, &ct).unwrap();
         assert_eq!(&pt[..], PT);
     }

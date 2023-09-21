@@ -48,6 +48,7 @@ impl SymmetricSuite {
 /// An important invariant of this structure is that it does not include
 /// any combination of KEM, KDF, and AEAD that is not supported.
 #[allow(clippy::module_name_repetitions)]
+#[derive(Debug, Clone)]
 pub struct KeyConfig {
     pub(crate) key_id: KeyId,
     pub(crate) kem: Kem,

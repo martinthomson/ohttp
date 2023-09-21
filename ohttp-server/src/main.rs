@@ -51,7 +51,7 @@ fn generate_reply(
     enc_request: &[u8],
     mode: Mode,
 ) -> Res<Vec<u8>> {
-    let mut ohttp = ohttp_ref.lock().unwrap();
+    let ohttp = ohttp_ref.lock().unwrap();
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
     let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
 
