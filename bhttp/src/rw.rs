@@ -20,11 +20,11 @@ fn write_uint(n: u8, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
 pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into();
     match () {
-        _ if v < (1 << 6) => write_uint(1, v, w),
-        _ if v < (1 << 14) => write_uint(2, v | (1 << 14), w),
-        _ if v < (1 << 30) => write_uint(4, v | (2 << 30), w),
-        _ if v < (1 << 62) => write_uint(8, v | (3 << 62), w),
-        _ => panic!("Varint value too large"),
+        () if v < (1 << 6) => write_uint(1, v, w),
+        () if v < (1 << 14) => write_uint(2, v | (1 << 14), w),
+        () if v < (1 << 30) => write_uint(4, v | (2 << 30), w),
+        () if v < (1 << 62) => write_uint(8, v | (3 << 62), w),
+        () => panic!("Varint value too large"),
     }
 }
 
@@ -49,15 +49,16 @@ where
     let mut buf = [0; 7];
     let count = r.borrow_mut().read(&mut buf[..n])?;
     if count == 0 {
-        return Ok(None);
+        Ok(None)
     } else if count < n {
-        return Err(Error::Truncated);
+        Err(Error::Truncated)
+    } else {
+        let mut v = 0;
+        for i in &buf[..n] {
+            v = (v << 8) | u64::from(*i);
+        }
+        Ok(Some(v))
     }
-    let mut v = 0;
-    for i in &buf[..n] {
-        v = (v << 8) | u64::from(*i);
-    }
-    Ok(Some(v))
 }
 
 #[cfg(feature = "read-bhttp")]

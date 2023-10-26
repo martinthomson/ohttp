@@ -37,7 +37,7 @@ enum NssLoaded {
 
 impl Drop for NssLoaded {
     fn drop(&mut self) {
-        if *self == Self::NoDb {
+        if matches!(self, Self::NoDb) {
             unsafe {
                 secstatus_to_res(nss_init::NSS_Shutdown()).expect("NSS Shutdown failed");
             }

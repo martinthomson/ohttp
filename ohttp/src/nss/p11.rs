@@ -67,7 +67,7 @@ macro_rules! scoped_ptr {
 
         impl Drop for $scoped {
             fn drop(&mut self) {
-                _ = unsafe { $dtor(self.ptr) };
+                unsafe { $dtor(self.ptr) };
             }
         }
     };
