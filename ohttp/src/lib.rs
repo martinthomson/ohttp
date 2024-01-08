@@ -92,7 +92,7 @@ pub struct ClientRequest {
 #[cfg(feature = "client")]
 impl ClientRequest {
     /// Construct a `ClientRequest` from a specific `KeyConfig` instance.
-    pub fn from_config(mut config: KeyConfig) -> Res<Self> {
+    pub fn from_config(config: &mut KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
 
@@ -108,8 +108,8 @@ impl ClientRequest {
     /// Reads an encoded configuration and constructs a single use client sender.
     /// See `KeyConfig::decode` for the structure details.
     pub fn from_encoded_config(encoded_config: &[u8]) -> Res<Self> {
-        let config = KeyConfig::decode(encoded_config)?;
-        Self::from_config(config)
+        let mut config = KeyConfig::decode(encoded_config)?;
+        Self::from_config(&mut config)
     }
 
     /// Reads an encoded list of configurations and constructs a single use client sender
@@ -117,11 +117,11 @@ impl ClientRequest {
     /// See `KeyConfig::decode_list` for the structure details.
     pub fn from_encoded_config_list(encoded_config_list: &[u8]) -> Res<Self> {
         let mut configs = KeyConfig::decode_list(encoded_config_list)?;
-        let config = match configs.pop() {
+        let mut config = match configs.pop() {
             Some(c) => c,
             None => return Err(Error::Unsupported),
         };
-        Self::from_config(config)
+        Self::from_config(&mut config)
     }
 
     /// Encapsulate a request.  This consumes this object.
