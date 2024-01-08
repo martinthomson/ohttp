@@ -11,7 +11,7 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
-pub use self::p11::{random, PrivateKey, PublicKey, SymKey};
+pub use self::p11::{random, PrivateKey, PublicKey};
 use err::secstatus_to_res;
 pub use err::Error;
 use lazy_static::lazy_static;
