@@ -10,6 +10,12 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=lld
       NSS_DIR: ${{ github.workspace }}/nss
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - 1.63.0 # MSRV
+          - stable
 
     steps:
       - uses: actions/checkout@v2
@@ -76,6 +82,13 @@ jobs:
   check_rust_hpke:
     name: rust-hpke Build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - 1.63.0 # MSRV
+          - stable
+
     steps:
       - uses: actions/checkout@v2
 
