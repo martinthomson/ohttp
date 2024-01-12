@@ -1,11 +1,18 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  check_nss:
-    name: NSS Build
+  check:
+    name: Continuous Integration
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=lld
@@ -13,18 +20,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        hpke:
+          - nss
+          - rust-hpke
         rust:
           - 1.63.0 # MSRV
           - stable
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Build Prerequisites for NSS
+        if: matrix.hpke == 'nss'
         run: |
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
             build-essential \
@@ -47,76 +60,26 @@ jobs:
             --no-install-recommends
 
       - name: Fetch NSS and NSPR
+        if: matrix.hpke == 'nss'
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSS_DIR"/../nspr
           git clone --depth 1 https://github.com/nss-dev/nss "$NSS_DIR"
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
-      - uses: actions-rs/cargo@v1
-        name: Build
-        with:
-          command: build
-          args: --tests --no-default-features --features nss,client,server
+      - name: Build
+        run: |
+          cargo +${{ matrix.rust }} build --tests --features ${{ matrix.hpke}},client,server
 
-      - uses: actions-rs/cargo@v1
-        name: Run Tests
-        with:
-          command: test
-          args: --no-default-features --features nss,client,server
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+      - name: Run Tests
+        run: |
+          cargo +${{ matrix.rust }} test --features ${{ matrix.hpke}},client,server
 
-      - uses: actions-rs/cargo@v1
-        name: Check formatting
+      - name: Check formatting
         if: ${{ success() || failure() }}
-        with:
-          command: fmt
-          args: --all -- --check --config imports_granularity=Crate
+        run: |
+          cargo +${{ matrix.rust }} fmt --all -- --check --config imports_granularity=Crate
 
-      - uses: actions-rs/cargo@v1
-        name: Clippy
+      - name: Clippy
         if: ${{ success() || failure() }}
-        with:
-          command: clippy
-          args: --tests --no-default-features --features nss,client,server
-
-  check_rust_hpke:
-    name: rust-hpke Build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rust:
-          - 1.63.0 # MSRV
-          - stable
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - uses: actions-rs/cargo@v1
-        name: Build
-        with:
-          command: build
-          args: --tests
-
-      - uses: actions-rs/cargo@v1
-        name: Run Tests
-        with:
-          command: test
-
-      - uses: actions-rs/cargo@v1
-        name: Check formatting
-        if: ${{ success() || failure() }}
-        with:
-          command: fmt
-          args: --all -- --check --config imports_granularity=Crate
-
-      - uses: actions-rs/cargo@v1
-        name: Clippy
-        if: ${{ success() || failure() }}
-        with:
-          command: clippy
-          args: --tests
+        run: |
+          cargo clippy --tests  --features ${{ matrix.hpke}},client,server
