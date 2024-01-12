@@ -117,10 +117,11 @@ impl ClientRequest {
     /// See `KeyConfig::decode_list` for the structure details.
     pub fn from_encoded_config_list(encoded_config_list: &[u8]) -> Res<Self> {
         let mut configs = KeyConfig::decode_list(encoded_config_list)?;
-        let Some(mut config) = configs.pop() else {
-            return Err(Error::Unsupported);
-        };
-        Self::from_config(&mut config)
+        if let Some(mut config) = configs.pop() {
+            Self::from_config(&mut config)
+        } else {
+            Err(Error::Unsupported)
+        }
     }
 
     /// Encapsulate a request.  This consumes this object.
