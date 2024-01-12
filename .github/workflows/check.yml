@@ -15,7 +15,6 @@ jobs:
     name: Continuous Integration
     runs-on: ubuntu-latest
     env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=lld
       NSS_DIR: ${{ github.workspace }}/nss
     strategy:
       fail-fast: false
@@ -58,6 +57,8 @@ jobs:
             ssh \
             zlib1g-dev \
             --no-install-recommends
+          echo RUSTFLAGS="-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+
 
       - name: Fetch NSS and NSPR
         if: matrix.hpke == 'nss'
@@ -68,11 +69,11 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust }} build --tests --features ${{ matrix.hpke}},client,server
+          cargo +${{ matrix.rust }} build --tests --no-default-features --features ${{ matrix.hpke }},client,server
 
       - name: Run Tests
         run: |
-          cargo +${{ matrix.rust }} test --features ${{ matrix.hpke}},client,server
+          cargo +${{ matrix.rust }} test --no-default-features --features ${{ matrix.hpke }},client,server
 
       - name: Check formatting
         if: ${{ success() || failure() }}
@@ -82,4 +83,4 @@ jobs:
       - name: Clippy
         if: ${{ success() || failure() }}
         run: |
-          cargo clippy --tests  --features ${{ matrix.hpke}},client,server
+          cargo clippy --tests --no-default-features --features ${{ matrix.hpke }},client,server
