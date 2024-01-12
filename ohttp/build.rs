@@ -151,7 +151,7 @@ mod nss {
         libs.append(&mut nspr_libs());
 
         for lib in &libs {
-            println!("cargo:rustc-link-lib=dylib={}", lib);
+            println!("cargo:rustc-link-lib=dylib={lib}");
         }
     }
 
@@ -230,10 +230,10 @@ mod nss {
         }
 
         for lib in &static_libs {
-            println!("cargo:rustc-link-lib=static={}", lib);
+            println!("cargo:rustc-link-lib=static={lib}");
         }
         for lib in &dynamic_libs {
-            println!("cargo:rustc-link-lib=dylib={}", lib);
+            println!("cargo:rustc-link-lib=dylib={lib}");
         }
     }
 
@@ -253,7 +253,7 @@ mod nss {
         let header = header_path.to_str().unwrap();
         let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join(String::from(base) + ".rs");
 
-        println!("cargo:rerun-if-changed={}", header);
+        println!("cargo:rerun-if-changed={header}");
 
         let mut builder = Builder::default().header(header);
         builder = builder.generate_comments(false);
@@ -341,7 +341,7 @@ mod nss {
 
     fn pkg_config() -> Vec<String> {
         let modversion = Command::new("pkg-config")
-            .args(&["--modversion", "nss"])
+            .args(["--modversion", "nss"])
             .output()
             .expect("pkg-config reports NSS as absent")
             .stdout;
@@ -364,7 +364,7 @@ mod nss {
         }
 
         let cfg = Command::new("pkg-config")
-            .args(&["--cflags", "--libs", "nss"])
+            .args(["--cflags", "--libs", "nss"])
             .output()
             .expect("NSS flags not returned by pkg-config")
             .stdout;
@@ -374,13 +374,13 @@ mod nss {
         for f in cfg_str.split(' ') {
             if let Some(include) = f.strip_prefix("-I") {
                 flags.push(String::from(f));
-                println!("cargo:include={}", include);
+                println!("cargo:include={include}");
             } else if let Some(path) = f.strip_prefix("-L") {
-                println!("cargo:rustc-link-search=native={}", path);
+                println!("cargo:rustc-link-search=native={path}");
             } else if let Some(lib) = f.strip_prefix("-l") {
-                println!("cargo:rustc-link-lib=dylib={}", lib);
+                println!("cargo:rustc-link-lib=dylib={lib}");
             } else {
-                println!("Warning: Unknown flag from pkg-config: {}", f);
+                println!("Warning: Unknown flag from pkg-config: {f}");
             }
         }
 

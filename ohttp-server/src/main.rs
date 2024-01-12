@@ -82,7 +82,7 @@ async fn serve(
             if let Ok(oe) = e.downcast::<::ohttp::Error>() {
                 Ok(warp::http::Response::builder()
                     .status(422)
-                    .body(Vec::from(format!("Error: {:?}", oe).as_bytes())))
+                    .body(Vec::from(format!("Error: {oe:?}").as_bytes())))
             } else {
                 Ok(warp::http::Response::builder()
                     .status(400)

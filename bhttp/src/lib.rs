@@ -660,7 +660,7 @@ impl Message {
 
         let mut header = FieldSection::read_http(r)?;
 
-        let (content, trailer) = if matches!(control.status(), Some(204) | Some(304)) {
+        let (content, trailer) = if matches!(control.status(), Some(204 | 304)) {
             // 204 and 304 have no body, no matter what Content-Length says.
             // Unfortunately, we can't do the same for responses to HEAD.
             (Vec::new(), FieldSection::default())
