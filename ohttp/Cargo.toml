@@ -57,4 +57,4 @@ optional = true
 features = ["runtime"]
 
 [dev-dependencies]
-env_logger = {version = "0.9", default-features = false}
+env_logger = {version = "0.10", default-features = false}
