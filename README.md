@@ -135,3 +135,7 @@ clippy --tests`.
 There is a pre-commit script that you can link to `.git/hooks/pre-commit` that
 runs `cargo fmt` on all commits.  Just run `./pre-commit install` to have it
 install itself.
+
+## Minnimum Supported Rust Version (MSRV)
+
+`ohttp` and `bhttp` should compile on Rust 1.63.0.

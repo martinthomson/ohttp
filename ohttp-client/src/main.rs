@@ -101,6 +101,7 @@ async fn main() -> Res<()> {
             File::open(pem)?.read_to_end(&mut buf)?;
             let cert = reqwest::Certificate::from_pem(buf.as_slice())?;
             reqwest::ClientBuilder::new()
+                .danger_accept_invalid_certs(true)
                 .add_root_certificate(cert)
                 .build()?
         }
