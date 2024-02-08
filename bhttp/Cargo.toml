@@ -1,6 +1,6 @@
 [package]
 name = "bhttp"
-description = "Binary HTTP messages (draft-ietf-httpbis-binary-message)"
+description = "Binary HTTP messages (RFC 9292)"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

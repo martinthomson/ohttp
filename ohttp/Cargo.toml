@@ -1,6 +1,6 @@
 [package]
 name = "ohttp"
-description = "Oblivious HTTP"
+description = "Oblivious HTTP (RFC 9458)"
 build = "build.rs"
 version.workspace = true
 authors.workspace = true
