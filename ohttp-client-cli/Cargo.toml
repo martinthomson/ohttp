@@ -1,12 +1,8 @@
 [package]
 name = "ohttp-client-cli"
-description = "Low-level command-line client for testing OHTTP"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.5.1"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+edition = "2021"
 
 [features]
 default = ["rust-hpke"]

@@ -1,12 +1,8 @@
 [package]
 name = "bhttp-convert"
-description = "Tool for converting HTTP messages to/from Binary HTTP"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.5.1"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+edition = "2021"
 
 [dependencies]
 structopt = "0.3"
