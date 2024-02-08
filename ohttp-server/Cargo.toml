@@ -1,8 +1,12 @@
 [package]
 name = "ohttp-server"
-version = "0.5.1"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
+description = "Simple test OHTTP server"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [features]
 default = ["rust-hpke"]
