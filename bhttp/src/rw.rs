@@ -1,9 +1,10 @@
-use crate::err::Res;
-#[cfg(feature = "read-bhttp")]
-use crate::{err::Error, ReadSeek};
 #[cfg(feature = "read-bhttp")]
 use std::borrow::BorrowMut;
 use std::{convert::TryFrom, io};
+
+use crate::err::Res;
+#[cfg(feature = "read-bhttp")]
+use crate::{err::Error, ReadSeek};
 
 #[cfg(feature = "write-bhttp")]
 #[allow(clippy::cast_possible_truncation)]

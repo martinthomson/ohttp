@@ -1,8 +1,9 @@
 // Rather than grapple with #[cfg(...)] for every variable and import.
 #![cfg(all(feature = "http", feature = "bhttp"))]
 
-use bhttp::{Error, Message, Mode};
 use std::{io::Cursor, mem::drop};
+
+use bhttp::{Error, Message, Mode};
 
 const CHUNKED_HTTP: &[u8] = b"HTTP/1.1 200 OK\r\n\
                               Transfer-Encoding: camel, chunked\r\n\
@@ -137,7 +138,7 @@ fn tiny_response() {
     const RESPONSE: &[u8] = &[0x01, 0x40, 0xc8];
     let m = Message::read_bhttp(&mut Cursor::new(RESPONSE)).unwrap();
     assert!(m.informational().is_empty());
-    assert_eq!(m.control().status().unwrap(), 200);
+    assert_eq!(m.control().status().unwrap().code(), 200);
     assert!(m.control().method().is_none());
     assert!(m.control().scheme().is_none());
     assert!(m.control().authority().is_none());

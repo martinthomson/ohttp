@@ -1,15 +1,16 @@
 #![deny(warnings, clippy::pedantic)]
 
-use bhttp::{Message, Mode};
-use ohttp::{
-    hpke::{Aead, Kdf, Kem},
-    KeyConfig, Server as OhttpServer, SymmetricSuite,
-};
 use std::{
     io::Cursor,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
+};
+
+use bhttp::{Message, Mode, StatusCode};
+use ohttp::{
+    hpke::{Aead, Kdf, Kem},
+    KeyConfig, Server as OhttpServer, SymmetricSuite,
 };
 use structopt::StructOpt;
 use warp::Filter;
@@ -55,7 +56,7 @@ fn generate_reply(
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
     let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
 
-    let mut bin_response = Message::response(200);
+    let mut bin_response = Message::response(StatusCode::OK);
     bin_response.write_content(b"Received:\r\n---8<---\r\n");
     let mut tmp = Vec::new();
     bin_request.write_http(&mut tmp)?;

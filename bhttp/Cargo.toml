@@ -5,7 +5,7 @@ authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 rust-version = "1.63.0"
 license = "MIT OR Apache-2.0"
-description = "Binary HTTP messages (draft-ietf-httpbis-binary-message)"
+description = "Binary HTTP messages (RFC 9292)"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
