@@ -37,7 +37,7 @@ mod nss {
         opaque: Vec<String>,
         /// enumerations that are turned into a module (without this, the enum is
         /// mapped using the default, which means that the individual values are
-        /// formed with an underscore as <enum_type>_<enum_value_name>).
+        /// formed with an underscore as `<enum_type>_<enum_value_name>`).
         #[serde(default)]
         enums: Vec<String>,
 
