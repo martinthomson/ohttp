@@ -66,12 +66,25 @@ impl TryFrom<u64> for StatusCode {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let v = u16::try_from(value).map_err(|_| Error::InvalidStatus)?;
-        if matches!(v, 100..=599) {
-            Ok(Self(v))
+        Self::try_from(u16::try_from(value).map_err(|_| Error::InvalidStatus)?)
+    }
+}
+
+impl TryFrom<u16> for StatusCode {
+    type Error = Error;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        if matches!(value, 100..=599) {
+            Ok(Self(value))
         } else {
             Err(Error::InvalidStatus)
         }
+    }
+}
+
+impl From<StatusCode> for u16 {
+    fn from(value: StatusCode) -> Self {
+        value.code()
     }
 }
 
