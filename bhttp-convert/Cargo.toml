@@ -1,6 +1,6 @@
 [package]
 name = "bhttp-convert"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 
