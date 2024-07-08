@@ -1,11 +1,10 @@
 #![deny(warnings, clippy::pedantic)]
 
 use std::{
-    io::Cursor,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, Mutex},
+    io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
 };
+
+use tokio::sync::Mutex;
 
 use bhttp::{Message, Mode, StatusCode};
 use ohttp::{
@@ -35,6 +34,10 @@ struct Args {
     /// Key for the certificate to use for serving.
     #[structopt(long, short = "k", default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/server.key"))]
     key: PathBuf,
+
+    /// Target server 
+    #[structopt(default_value = "142.250.180.14:80")]
+    target: SocketAddr,
 }
 
 impl Args {
@@ -47,21 +50,30 @@ impl Args {
     }
 }
 
-fn generate_reply(
+async fn generate_reply(
     ohttp_ref: &Arc<Mutex<OhttpServer>>,
     enc_request: &[u8],
+    target: SocketAddr,
     mode: Mode,
 ) -> Res<Vec<u8>> {
-    let ohttp = ohttp_ref.lock().unwrap();
+    let ohttp = ohttp_ref.lock().await;
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
-    let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
+    let _bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
+
+    let client = reqwest::ClientBuilder::new().build()?;
+    let body: Vec<u8> = _bin_request.content().to_vec();
+
+    let response = client
+        .get(target.to_string())
+        .body(body)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
 
     let mut bin_response = Message::response(StatusCode::OK);
-    bin_response.write_content(b"Received:\r\n---8<---\r\n");
-    let mut tmp = Vec::new();
-    bin_request.write_http(&mut tmp)?;
-    bin_response.write_content(&tmp);
-    bin_response.write_content(b"--->8---\r\n");
+    bin_response.write_content(response);
 
     let mut response = Vec::new();
     bin_response.write_bhttp(mode, &mut response)?;
@@ -70,16 +82,18 @@ fn generate_reply(
 }
 
 #[allow(clippy::unused_async)]
-async fn serve(
+async fn score(
     body: warp::hyper::body::Bytes,
     ohttp: Arc<Mutex<OhttpServer>>,
+    target: SocketAddr,
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
-    match generate_reply(&ohttp, &body[..], mode) {
+    match generate_reply(&ohttp, &body[..], target, mode).await {
         Ok(resp) => Ok(warp::http::Response::builder()
             .header("Content-Type", "message/ohttp-res")
             .body(resp)),
         Err(e) => {
+            println!("400 {}", e.to_string());
             if let Ok(oe) = e.downcast::<::ohttp::Error>() {
                 Ok(warp::http::Response::builder()
                     .status(422)
@@ -91,6 +105,16 @@ async fn serve(
             }
         }
     }
+}
+
+#[allow(clippy::unused_async)]
+async fn discover(
+    config: String,
+    _mode: Mode,
+) -> Result<impl warp::Reply, std::convert::Infallible> {
+    Ok(warp::http::Response::builder()
+        .status(200)
+        .body(Vec::from(config)))
 }
 
 fn with_ohttp(
@@ -114,19 +138,31 @@ async fn main() -> Res<()> {
         ],
     )?;
     let ohttp = OhttpServer::new(config)?;
-    println!(
-        "Config: {}",
-        hex::encode(KeyConfig::encode_list(&[ohttp.config()])?)
-    );
-    let mode = args.mode();
+    let config = hex::encode(KeyConfig::encode_list(&[ohttp.config()])?);
 
-    let filter = warp::post()
+    println!("Config: {}", config);
+    let mode = args.mode();
+    let target = args.target;
+
+    let score = warp::post()
+        .and(warp::path::path("score"))
         .and(warp::path::end())
         .and(warp::body::bytes())
         .and(with_ohttp(Arc::new(Mutex::new(ohttp))))
+        .and(warp::any().map(move || target))
         .and(warp::any().map(move || mode))
-        .and_then(serve);
-    warp::serve(filter)
+        .and_then(score);
+
+    let discover = warp::get()
+        .and(warp::path("discover"))
+        .and(warp::path::end())
+        .and(warp::any().map(move || config.clone()))
+        .and(warp::any().map(move || mode))
+        .and_then(discover);
+
+    let routes = score.or(discover);
+
+    warp::serve(routes)
         .tls()
         .cert_path(args.certificate)
         .key_path(args.key)
