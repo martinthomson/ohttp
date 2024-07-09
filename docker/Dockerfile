@@ -14,5 +14,5 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/cargo/bin/ohttp-server /usr/local/bin/ohttp-server
 COPY ./ohttp-server/ca.sh /usr/local/bin
-COPY --chmod=755 ./docker/run.sh /usr/local/bin
-CMD ["/usr/local/bin/run.sh"]
+COPY --chmod=755 ./docker/run.sh .
+CMD ["./run.sh"]

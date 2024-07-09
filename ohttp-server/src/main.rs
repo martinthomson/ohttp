@@ -4,6 +4,7 @@ use std::{
     io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
 };
 
+use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Url};
 use tokio::sync::Mutex;
 
 use bhttp::{Message, Mode, StatusCode};
@@ -36,8 +37,8 @@ struct Args {
     key: PathBuf,
 
     /// Target server 
-    #[structopt(default_value = "142.250.180.14:80")]
-    target: SocketAddr,
+    #[structopt(default_value = "http://127.0.0.1:5678")]
+    target: Url,
 }
 
 impl Args {
@@ -53,19 +54,25 @@ impl Args {
 async fn generate_reply(
     ohttp_ref: &Arc<Mutex<OhttpServer>>,
     enc_request: &[u8],
-    target: SocketAddr,
+    target: Url,
     mode: Mode,
 ) -> Res<Vec<u8>> {
     let ohttp = ohttp_ref.lock().await;
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
-    let _bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
+    let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
+    let mut headers = HeaderMap::new();
+    for field in bin_request.header().fields() {
+        println!("{}:{}", HeaderName::from_bytes(field.name()).unwrap(), std::str::from_utf8(field.value()).unwrap());
+        headers.append(
+            HeaderName::from_bytes(field.name()).unwrap(), 
+            HeaderValue::from_bytes(field.value()).unwrap());
+    }
 
     let client = reqwest::ClientBuilder::new().build()?;
-    let body: Vec<u8> = _bin_request.content().to_vec();
-
     let response = client
         .get(target.to_string())
-        .body(body)
+        .headers(headers)
+        .body(bin_request.content().to_vec())
         .send()
         .await?
         .error_for_status()?
@@ -85,7 +92,7 @@ async fn generate_reply(
 async fn score(
     body: warp::hyper::body::Bytes,
     ohttp: Arc<Mutex<OhttpServer>>,
-    target: SocketAddr,
+    target: Url,
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(&ohttp, &body[..], target, mode).await {
@@ -110,7 +117,6 @@ async fn score(
 #[allow(clippy::unused_async)]
 async fn discover(
     config: String,
-    _mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     Ok(warp::http::Response::builder()
         .status(200)
@@ -149,7 +155,7 @@ async fn main() -> Res<()> {
         .and(warp::path::end())
         .and(warp::body::bytes())
         .and(with_ohttp(Arc::new(Mutex::new(ohttp))))
-        .and(warp::any().map(move || target))
+        .and(warp::any().map(move || target.clone()))
         .and(warp::any().map(move || mode))
         .and_then(score);
 
@@ -157,7 +163,6 @@ async fn main() -> Res<()> {
         .and(warp::path("discover"))
         .and(warp::path::end())
         .and(warp::any().map(move || config.clone()))
-        .and(warp::any().map(move || mode))
         .and_then(discover);
 
     let routes = score.or(discover);
