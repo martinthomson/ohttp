@@ -1,10 +1,10 @@
-#![deny(warnings, clippy::pedantic)]
+#![deny(clippy::pedantic)]
 
 use std::{
-    io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
+    io::Cursor, net::SocketAddr, path::{PathBuf}, sync::Arc
 };
 
-use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Url};
+use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Url, Method};
 use tokio::sync::Mutex;
 
 use bhttp::{Message, Mode, StatusCode};
@@ -37,7 +37,7 @@ struct Args {
     key: PathBuf,
 
     /// Target server 
-    #[structopt(default_value = "http://127.0.0.1:5678")]
+    #[structopt(long, short = "t", default_value = "http://127.0.0.1:5678")]
     target: Url,
 }
 
@@ -60,17 +60,30 @@ async fn generate_reply(
     let ohttp = ohttp_ref.lock().await;
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
     let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
+
+    let method: Method = if let Some(method_bytes) = bin_request.control().method() {
+        Method::from_bytes(method_bytes)?
+    } else {
+        Method::GET
+    };
+
     let mut headers = HeaderMap::new();
     for field in bin_request.header().fields() {
-        println!("{}:{}", HeaderName::from_bytes(field.name()).unwrap(), std::str::from_utf8(field.value()).unwrap());
         headers.append(
             HeaderName::from_bytes(field.name()).unwrap(), 
             HeaderValue::from_bytes(field.value()).unwrap());
     }
 
+    let mut t = target;
+    if let Some(path_bytes) = bin_request.control().path() {
+        if let Ok(path_str) = std::str::from_utf8(path_bytes) {
+            t.set_path(path_str);
+        }
+    }
+
     let client = reqwest::ClientBuilder::new().build()?;
     let response = client
-        .get(target.to_string())
+        .request(method, t)
         .headers(headers)
         .body(bin_request.content().to_vec())
         .send()
