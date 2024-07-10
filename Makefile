@@ -1,8 +1,10 @@
+TARGET ?= http://127.0.0.1:5678
+
 ca:
 	./ohttp-server/ca.sh
 
 run: ca
-	cargo run --bin ohttp-server -- --target http://127.0.0.1:5678
+	cargo run --bin ohttp-server -- --target ${TARGET}
 
 run-client:
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
