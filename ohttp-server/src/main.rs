@@ -1,19 +1,19 @@
 #![deny(clippy::pedantic)]
 
 use std::{
-    io::Cursor, net::SocketAddr, path::{PathBuf}, sync::Arc
+    io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
 };
 
-use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Url, Method};
+use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Response, Url};
 use tokio::sync::Mutex;
 
 use bhttp::{Message, Mode, StatusCode};
 use ohttp::{
-    hpke::{Aead, Kdf, Kem},
-    KeyConfig, Server as OhttpServer, SymmetricSuite,
+    hpke::{Aead, Kdf, Kem}, KeyConfig, Server as OhttpServer, ServerResponse, SymmetricSuite
 };
 use structopt::StructOpt;
 use warp::Filter;
+use warp::hyper::Body;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -55,8 +55,8 @@ async fn generate_reply(
     ohttp_ref: &Arc<Mutex<OhttpServer>>,
     enc_request: &[u8],
     target: Url,
-    mode: Mode,
-) -> Res<Vec<u8>> {
+    _mode: Mode,
+) -> Res<(Response, ServerResponse)> {
     let ohttp = ohttp_ref.lock().await;
     let (request, server_response) = ohttp.decapsulate(enc_request)?;
     let bin_request = Message::read_bhttp(&mut Cursor::new(&request[..]))?;
@@ -88,17 +88,9 @@ async fn generate_reply(
         .body(bin_request.content().to_vec())
         .send()
         .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
+        .error_for_status()?;
 
-    let mut bin_response = Message::response(StatusCode::OK);
-    bin_response.write_content(response);
-
-    let mut response = Vec::new();
-    bin_response.write_bhttp(mode, &mut response)?;
-    let enc_response = server_response.encapsulate(&response)?;
-    Ok(enc_response)
+    Ok((response, server_response))
 }
 
 #[allow(clippy::unused_async)]
@@ -109,19 +101,47 @@ async fn score(
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(&ohttp, &body[..], target, mode).await {
-        Ok(resp) => Ok(warp::http::Response::builder()
-            .header("Content-Type", "message/ohttp-res")
-            .body(resp)),
+        Ok((response, server_response)) => {
+
+            let stream = futures_util::stream::unfold(
+                (response, server_response, mode), |(mut response, mut server_response, mode)| async move {
+                match response.chunk().await {
+                    Ok(res) => {
+                        if let Some(chunk) = res {
+                            let mut bin_response = Message::response(StatusCode::OK);
+                            bin_response.write_content(chunk);
+                            let mut chunked_response = Vec::new();
+                            bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
+                            if let Ok(enc_response) = server_response.encapsulate(&chunked_response) {
+                                Some((Ok::<Vec<u8>, std::io::Error>(enc_response), (response, server_response, mode)))
+                            } else {
+                                None
+                            }
+                        } 
+                        else {
+                            None
+                        }
+                    }
+                    Err(_)  => {
+                        None
+                    }
+                }
+            });
+        
+            Ok(warp::http::Response::builder()
+                .header("Content-Type", "message/ohttp-res")
+                .body(Body::wrap_stream(stream)))
+        }
         Err(e) => {
             println!("400 {}", e.to_string());
             if let Ok(oe) = e.downcast::<::ohttp::Error>() {
                 Ok(warp::http::Response::builder()
                     .status(422)
-                    .body(Vec::from(format!("Error: {oe:?}").as_bytes())))
+                    .body(Body::from(format!("Error: {oe:?}"))))
             } else {
                 Ok(warp::http::Response::builder()
                     .status(400)
-                    .body(Vec::from(&b"Request error"[..])))
+                    .body(Body::from(&b"Request error"[..])))
             }
         }
     }

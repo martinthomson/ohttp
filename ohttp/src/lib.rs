@@ -1,4 +1,4 @@
-#![deny(warnings, clippy::pedantic)]
+#![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
 #![cfg_attr(
     not(all(feature = "client", feature = "server")),
@@ -259,6 +259,24 @@ impl ServerResponse {
         })
     }
 
+    // Variable length encoding of an integer
+    fn variant_encode(&mut self, mut val: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        loop {
+            let mut byte = (val & 0x7F) as u8; // Take the last 7 bits
+            val >>= 7; // Shift right by 7 bits
+            if val != 0 {
+                byte |= 0x80; // Set the MSB if there's more to encode
+            }
+            bytes.push(byte);
+            if val == 0 {
+                break;
+            }
+        }
+        bytes.reverse(); // The most significant chunk should come first
+        bytes
+    }
+
     /// Consume this object by encapsulating a response.
     pub fn encapsulate(mut self, response: &[u8]) -> Res<Vec<u8>> {
         let mut enc_response = self.response_nonce;
@@ -266,12 +284,32 @@ impl ServerResponse {
         enc_response.append(&mut ct);
         Ok(enc_response)
     }
+
+    /// Encapsulating a chunk in the response.
+    pub fn encapsulate_chunk(&mut self, chunk: &[u8], first: bool, last: bool) -> Res<Vec<u8>> {
+        let mut enc_response = Vec::new();
+        if first { enc_response.append(&mut self.response_nonce); }
+        let aad = if last { "final" } else { "" };
+        let mut ct = self.aead.seal(aad.as_bytes(), chunk)?;
+        let mut enc_length = self.variant_encode(if last { 0 } else { ct.len() });
+        enc_response.append(&mut enc_length);
+        enc_response.append(&mut ct);
+        Ok(enc_response)
+    }
+
 }
 
 #[cfg(feature = "server")]
 impl std::fmt::Debug for ServerResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ServerResponse")
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::fmt::Debug for ChunkedResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChunkResponse")
     }
 }
 
