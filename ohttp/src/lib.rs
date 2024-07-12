@@ -285,10 +285,13 @@ impl ServerResponse {
         Ok(enc_response)
     }
 
+    pub fn response_nonce(&mut self) -> Res<Vec<u8>> {
+        return Ok(self.response_nonce.clone());
+    }
+
     /// Encapsulating a chunk in the response.
-    pub fn encapsulate_chunk(&mut self, chunk: &[u8], first: bool, last: bool) -> Res<Vec<u8>> {
+    pub fn encapsulate_chunk(&mut self, chunk: &[u8], last: bool) -> Res<Vec<u8>> {
         let mut enc_response = Vec::new();
-        if first { enc_response.append(&mut self.response_nonce); }
         let aad = if last { "final" } else { "" };
         let mut ct = self.aead.seal(aad.as_bytes(), chunk)?;
         let mut enc_length = self.variant_encode(if last { 0 } else { ct.len() });
@@ -303,13 +306,6 @@ impl ServerResponse {
 impl std::fmt::Debug for ServerResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ServerResponse")
-    }
-}
-
-#[cfg(feature = "server")]
-impl std::fmt::Debug for ChunkedResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ChunkResponse")
     }
 }
 

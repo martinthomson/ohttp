@@ -4,6 +4,8 @@ use std::{
     io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
 };
 
+use futures::StreamExt;
+use futures_util::stream::{once, unfold};
 use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Response, Url};
 use tokio::sync::Mutex;
 
@@ -101,9 +103,12 @@ async fn score(
     mode: Mode,
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(&ohttp, &body[..], target, mode).await {
-        Ok((response, server_response)) => {
+        Ok((response, mut server_response)) => {
 
-            let stream = futures_util::stream::unfold(
+            let response_nonce = server_response.response_nonce();
+            let nonce_stream = once(async { response_nonce });
+
+            let chunk_stream = unfold(
                 (response, server_response, mode), |(mut response, mut server_response, mode)| async move {
                 match response.chunk().await {
                     Ok(res) => {
@@ -112,8 +117,8 @@ async fn score(
                             bin_response.write_content(chunk);
                             let mut chunked_response = Vec::new();
                             bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
-                            if let Ok(enc_response) = server_response.encapsulate(&chunked_response) {
-                                Some((Ok::<Vec<u8>, std::io::Error>(enc_response), (response, server_response, mode)))
+                            if let Ok(enc_response) = server_response.encapsulate_chunk(&chunked_response, false) {
+                                Some((Ok::<Vec<u8>, ohttp::Error>(enc_response), (response, server_response, mode)))
                             } else {
                                 None
                             }
@@ -128,6 +133,8 @@ async fn score(
                 }
             });
         
+            let stream = nonce_stream.chain(chunk_stream);
+
             Ok(warp::http::Response::builder()
                 .header("Content-Type", "message/ohttp-res")
                 .body(Body::wrap_stream(stream)))
