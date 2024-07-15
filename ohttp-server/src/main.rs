@@ -95,6 +95,7 @@ async fn generate_reply(
     Ok((response, server_response))
 }
 
+
 #[allow(clippy::unused_async)]
 async fn score(
     body: warp::hyper::body::Bytes,
@@ -104,37 +105,32 @@ async fn score(
 ) -> Result<impl warp::Reply, std::convert::Infallible> {
     match generate_reply(&ohttp, &body[..], target, mode).await {
         Ok((response, mut server_response)) => {
-
             let response_nonce = server_response.response_nonce();
             let nonce_stream = once(async { response_nonce });
+            
+            let chunk_stream = unfold((true, None, response, server_response, mode), 
+                |(first, chunk, mut response, mut server_response, mode)| async move {
+                    let chunk = if first { response.chunk().await.unwrap() } else { chunk };
+                    let Some(chunk) = chunk else { return None };
+                    println!("Processing chunk {} {}", first, std::str::from_utf8(&chunk).unwrap());
+                    let mut bin_response = Message::response(StatusCode::OK);
+                    bin_response.write_content(chunk);
+                    let mut chunked_response = Vec::new();
+                    bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
 
-            let chunk_stream = unfold(
-                (response, server_response, mode), |(mut response, mut server_response, mode)| async move {
-                match response.chunk().await {
-                    Ok(res) => {
-                        if let Some(chunk) = res {
-                            let mut bin_response = Message::response(StatusCode::OK);
-                            bin_response.write_content(chunk);
-                            let mut chunked_response = Vec::new();
-                            bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
-                            if let Ok(enc_response) = server_response.encapsulate_chunk(&chunked_response, false) {
-                                Some((Ok::<Vec<u8>, ohttp::Error>(enc_response), (response, server_response, mode)))
-                            } else {
-                                None
-                            }
-                        } 
-                        else {
-                            None
-                        }
-                    }
-                    Err(_)  => {
-                        None
-                    }
+                    let (next_chunk, last, err) = match response.chunk().await {
+                        Ok(Some(c)) => (Some(c), false, None),
+                        Ok(None) => (None, true, None),
+                        Err(_) => (None, false, Some(ohttp::Error::Truncated))
+                    };
+                    
+                    if let Some(_) = err { return None };
+                    let enc_response = server_response.encapsulate_chunk(&chunked_response, last).unwrap();
+                    Some((Ok::<Vec<u8>, ohttp::Error>(enc_response), (false, next_chunk, response, server_response, mode)))
                 }
-            });
+            );
         
             let stream = nonce_stream.chain(chunk_stream);
-
             Ok(warp::http::Response::builder()
                 .header("Content-Type", "message/ohttp-chunked-res")
                 .body(Body::wrap_stream(stream)))

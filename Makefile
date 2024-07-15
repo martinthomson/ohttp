@@ -1,4 +1,4 @@
-TARGET ?= http://127.0.0.1:5678
+TARGET ?= http://127.0.0.1:3000
 
 ca:
 	./ohttp-server/ca.sh
