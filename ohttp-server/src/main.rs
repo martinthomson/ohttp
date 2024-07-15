@@ -136,7 +136,7 @@ async fn score(
             let stream = nonce_stream.chain(chunk_stream);
 
             Ok(warp::http::Response::builder()
-                .header("Content-Type", "message/ohttp-res")
+                .header("Content-Type", "message/ohttp-chunked-res")
                 .body(Body::wrap_stream(stream)))
         }
         Err(e) => {
