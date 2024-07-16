@@ -315,6 +315,8 @@ impl std::fmt::Debug for ServerResponse {
 pub struct ClientResponse {
     hpke: HpkeS,
     enc: Vec<u8>,
+    seq: u64,
+    aead: Option<Aead>
 }
 
 #[cfg(feature = "client")]
@@ -323,7 +325,9 @@ impl ClientResponse {
     /// Doesn't do anything because we don't have the nonce yet, so
     /// the work that can be done is limited.
     fn new(hpke: HpkeS, enc: Vec<u8>) -> Self {
-        Self { hpke, enc }
+        let seq = 0;
+        let aead = None;
+        Self { hpke, enc, seq, aead }
     }
 
     /// Consume this object by decapsulating a response.
@@ -342,6 +346,53 @@ impl ClientResponse {
         )?;
         aead.open(&[], 0, ct) // 0 is the sequence number
     }
+
+    pub fn set_response_nonce(&mut self, enc_response: &[u8]) -> Res<()> {
+        let mid = entropy(self.hpke.config());
+        if mid != enc_response.len() {
+            return Err(Error::Truncated);
+        }
+        let aead = make_aead(
+            Mode::Decrypt,
+            self.hpke.config(),
+            &self.hpke,
+            self.enc.clone(),
+            enc_response,
+        )?;
+        self.aead = Some(aead);
+        Ok(())
+    }
+
+    fn variant_decode(&mut self, bytes: &[u8]) -> Result<(u64, usize), String> {
+        let mut value: u64 = 0;
+        let mut shift = 0;
+        let mut bytes_read = 0;
+    
+        for &byte in bytes {
+            let byte_value = (byte & 0x7F) as u64;
+            value |= byte_value << shift;
+            bytes_read += 1;
+            if byte & 0x80 == 0 {
+                // Continuation bit is not set, end of the VLQ-encoded integer
+                return Ok((value, bytes_read));
+            }
+            shift += 7;
+            if shift >= 64 {
+                return Err("VLQ-encoded integer is too large".to_string());
+            }
+        }
+        Err("Incomplete VLQ-encoded integer".to_string())
+    }
+
+    /// Decapsulate a response.
+    pub fn decapsulate_chunk(&mut self, enc_response: &[u8]) -> (Res<Vec<u8>>, bool) {
+        let (len, bytes_read) = self.variant_decode(enc_response).unwrap();
+        let (_, ct) = enc_response.split_at(bytes_read);
+        let aad = if len == 0 { "final" } else { "" };
+        self.seq += 1;
+        (self.aead.as_mut().unwrap().open(aad.as_bytes(), self.seq - 1, ct), len == 0)
+    }
+
 }
 
 #[cfg(all(test, feature = "client", feature = "server"))]

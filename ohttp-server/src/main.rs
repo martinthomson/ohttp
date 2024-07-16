@@ -121,7 +121,7 @@ async fn score(
                     let (next_chunk, last, err) = match response.chunk().await {
                         Ok(Some(c)) => (Some(c), false, None),
                         Ok(None) => (None, true, None),
-                        Err(_) => (None, false, Some(ohttp::Error::Truncated))
+                        Err(_) => (None, true, Some(ohttp::Error::Truncated))
                     };
                     
                     if let Some(_) = err { return None };

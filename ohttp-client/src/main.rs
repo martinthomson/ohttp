@@ -1,7 +1,7 @@
-#![deny(warnings, clippy::pedantic)]
+#![deny(clippy::pedantic)]
 
 use bhttp::{Message, Mode};
-use std::{fs::File, io, io::Read, ops::Deref, path::PathBuf, str::FromStr};
+use std::{fs::File, io::{self, Read}, ops::Deref, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -92,7 +92,7 @@ async fn main() -> Res<()> {
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
     let ohttp_request = ohttp::ClientRequest::from_encoded_config_list(&args.config)?;
-    let (enc_request, ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
+    let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 
     let client = match &args.trust {
@@ -108,28 +108,41 @@ async fn main() -> Res<()> {
         None => reqwest::ClientBuilder::new().build()?,
     };
 
-    let enc_response = client
+    let mut response = client
         .post(&args.url)
-        .header("content-type", "message/ohttp-req")
+        .header("content-type", "message/ohttp-chunked-req")
         .body(enc_request)
         .send()
         .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    println!("Response: {}", hex::encode(&enc_response));
-    let response_buf = ohttp_response.decapsulate(&enc_response)?;
-    let response = Message::read_bhttp(&mut std::io::Cursor::new(&response_buf[..]))?;
+        .error_for_status()?;
 
     let mut output: Box<dyn io::Write> = if let Some(outfile) = &args.output {
         Box::new(File::open(outfile)?)
     } else {
         Box::new(std::io::stdout())
     };
-    if args.binary {
-        response.write_bhttp(args.mode(), &mut output)?;
-    } else {
-        response.write_http(&mut output)?;
+    
+    let response_nonce = response.chunk().await?.unwrap();
+    ohttp_response.set_response_nonce(&response_nonce)?;
+
+    loop {
+        match response.chunk().await? {
+            Some(chunk) => {
+                println!("Decapsulating {}, {}", chunk.len(), hex::encode(&chunk));
+                let (response_buf, last) = ohttp_response.decapsulate_chunk(&chunk);
+                let buf = response_buf.unwrap();
+                let response = Message::read_bhttp(&mut std::io::Cursor::new(&buf[..]))?;
+                if args.binary {
+                    response.write_bhttp(args.mode(), &mut output)?;
+                } else {
+                    response.write_http(&mut output)?;
+                }
+                if last { break; }
+            }
+            None => {
+                break;
+            }
+        }    
     }
     Ok(())
 }
