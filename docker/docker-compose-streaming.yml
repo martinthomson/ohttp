@@ -1,11 +1,13 @@
 services:
-  ohttp:
+  server:
     image: ohttp-server
-    network_mode: "host"
     ports:
       - "9443:9443"
+    network_mode: "host"
     environment:
       - TARGET=http://localhost:3000
+    depends_on:
+      - web_service
 
   web_service:
     image: nodejs-streaming
