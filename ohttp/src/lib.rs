@@ -299,7 +299,6 @@ impl ServerResponse {
         enc_response.append(&mut ct);
         Ok(enc_response)
     }
-
 }
 
 #[cfg(feature = "server")]
@@ -316,7 +315,7 @@ pub struct ClientResponse {
     hpke: HpkeS,
     enc: Vec<u8>,
     seq: u64,
-    aead: Option<Aead>
+    aead: Option<Aead>,
 }
 
 #[cfg(feature = "client")]
@@ -327,7 +326,12 @@ impl ClientResponse {
     fn new(hpke: HpkeS, enc: Vec<u8>) -> Self {
         let seq = 0;
         let aead = None;
-        Self { hpke, enc, seq, aead }
+        Self {
+            hpke,
+            enc,
+            seq,
+            aead,
+        }
     }
 
     /// Consume this object by decapsulating a response.
@@ -367,7 +371,7 @@ impl ClientResponse {
         let mut value: u64 = 0;
         let mut shift = 0;
         let mut bytes_read = 0;
-    
+
         for &byte in bytes {
             let byte_value = (byte & 0x7F) as u64;
             value |= byte_value << shift;
@@ -390,9 +394,14 @@ impl ClientResponse {
         let (_, ct) = enc_response.split_at(bytes_read);
         let aad = if len == 0 { "final" } else { "" };
         self.seq += 1;
-        (self.aead.as_mut().unwrap().open(aad.as_bytes(), self.seq - 1, ct), len == 0)
+        (
+            self.aead
+                .as_mut()
+                .unwrap()
+                .open(aad.as_bytes(), self.seq - 1, ct),
+            len == 0,
+        )
     }
-
 }
 
 #[cfg(all(test, feature = "client", feature = "server"))]

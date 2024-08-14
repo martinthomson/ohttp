@@ -31,6 +31,8 @@ macro_rules! convert_enum {
 
 convert_enum! {
 pub enum Kem {
+    P384Sha384 = 17,
+
     X25519Sha256 = 32,
 
     #[cfg(feature = "pq")]
@@ -42,6 +44,8 @@ impl Kem {
     #[must_use]
     pub fn n_enc(self) -> usize {
         match self {
+            Kem::P384Sha384 => 97,
+
             Kem::X25519Sha256 => 32,
 
             #[cfg(feature = "pq")]
@@ -52,6 +56,8 @@ impl Kem {
     #[must_use]
     pub fn n_pk(self) -> usize {
         match self {
+            Kem::P384Sha384 => 97,
+            
             Kem::X25519Sha256 => 32,
 
             #[cfg(feature = "pq")]

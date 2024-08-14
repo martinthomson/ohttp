@@ -1,21 +1,23 @@
 #![deny(clippy::pedantic)]
 
-use std::{
-    io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc
-};
+use std::{io::Cursor, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use futures_util::stream::{once, unfold};
-use reqwest::{header::{HeaderMap, HeaderName, HeaderValue}, Method, Response, Url};
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    Method, Response, Url,
+};
 use tokio::sync::Mutex;
 
 use bhttp::{Message, Mode, StatusCode};
 use ohttp::{
-    hpke::{Aead, Kdf, Kem}, KeyConfig, Server as OhttpServer, ServerResponse, SymmetricSuite
+    hpke::{Aead, Kdf, Kem},
+    KeyConfig, Server as OhttpServer, ServerResponse, SymmetricSuite,
 };
 use structopt::StructOpt;
-use warp::Filter;
 use warp::hyper::Body;
+use warp::Filter;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -38,7 +40,7 @@ struct Args {
     #[structopt(long, short = "k", default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/server.key"))]
     key: PathBuf,
 
-    /// Target server 
+    /// Target server
     #[structopt(long, short = "t", default_value = "http://127.0.0.1:5678")]
     target: Url,
 }
@@ -72,8 +74,9 @@ async fn generate_reply(
     let mut headers = HeaderMap::new();
     for field in bin_request.header().fields() {
         headers.append(
-            HeaderName::from_bytes(field.name()).unwrap(), 
-            HeaderValue::from_bytes(field.value()).unwrap());
+            HeaderName::from_bytes(field.name()).unwrap(),
+            HeaderValue::from_bytes(field.value()).unwrap(),
+        );
     }
 
     let mut t = target;
@@ -95,7 +98,6 @@ async fn generate_reply(
     Ok((response, server_response))
 }
 
-
 #[allow(clippy::unused_async)]
 async fn score(
     body: warp::hyper::body::Bytes,
@@ -107,29 +109,47 @@ async fn score(
         Ok((response, mut server_response)) => {
             let response_nonce = server_response.response_nonce();
             let nonce_stream = once(async { response_nonce });
-            
-            let chunk_stream = unfold((true, None, response, server_response, mode), 
+
+            let chunk_stream = unfold(
+                (true, None, response, server_response, mode),
                 |(first, chunk, mut response, mut server_response, mode)| async move {
-                    let chunk = if first { response.chunk().await.unwrap() } else { chunk };
+                    let chunk = if first {
+                        response.chunk().await.unwrap()
+                    } else {
+                        chunk
+                    };
                     let Some(chunk) = chunk else { return None };
-                    println!("Processing chunk {} {}", first, std::str::from_utf8(&chunk).unwrap());
+                    println!(
+                        "Processing chunk {} {}",
+                        first,
+                        std::str::from_utf8(&chunk).unwrap()
+                    );
                     let mut bin_response = Message::response(StatusCode::OK);
                     bin_response.write_content(chunk);
                     let mut chunked_response = Vec::new();
-                    bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
+                    bin_response
+                        .write_bhttp(mode, &mut chunked_response)
+                        .unwrap();
 
                     let (next_chunk, last, err) = match response.chunk().await {
                         Ok(Some(c)) => (Some(c), false, None),
                         Ok(None) => (None, true, None),
-                        Err(_) => (None, true, Some(ohttp::Error::Truncated))
+                        Err(_) => (None, true, Some(ohttp::Error::Truncated)),
                     };
-                    
-                    if let Some(_) = err { return None };
-                    let enc_response = server_response.encapsulate_chunk(&chunked_response, last).unwrap();
-                    Some((Ok::<Vec<u8>, ohttp::Error>(enc_response), (false, next_chunk, response, server_response, mode)))
-                }
+
+                    if let Some(_) = err {
+                        return None;
+                    };
+                    let enc_response = server_response
+                        .encapsulate_chunk(&chunked_response, last)
+                        .unwrap();
+                    Some((
+                        Ok::<Vec<u8>, ohttp::Error>(enc_response),
+                        (false, next_chunk, response, server_response, mode),
+                    ))
+                },
             );
-        
+
             let stream = nonce_stream.chain(chunk_stream);
             Ok(warp::http::Response::builder()
                 .header("Content-Type", "message/ohttp-chunked-res")
@@ -151,9 +171,7 @@ async fn score(
 }
 
 #[allow(clippy::unused_async)]
-async fn discover(
-    config: String,
-) -> Result<impl warp::Reply, std::convert::Infallible> {
+async fn discover(config: String) -> Result<impl warp::Reply, std::convert::Infallible> {
     Ok(warp::http::Response::builder()
         .status(200)
         .body(Vec::from(config)))

@@ -1,7 +1,13 @@
 #![deny(clippy::pedantic)]
 
 use bhttp::{Message, Mode};
-use std::{fs::File, io::{self, Read}, ops::Deref, path::PathBuf, str::FromStr};
+use std::{
+    fs::File,
+    io::{self, Read},
+    ops::Deref,
+    path::PathBuf,
+    str::FromStr,
+};
 use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -121,7 +127,7 @@ async fn main() -> Res<()> {
     } else {
         Box::new(std::io::stdout())
     };
-    
+
     let response_nonce = response.chunk().await?.unwrap();
     ohttp_response.set_response_nonce(&response_nonce)?;
 
@@ -137,12 +143,14 @@ async fn main() -> Res<()> {
                 } else {
                     response.write_http(&mut output)?;
                 }
-                if last { break; }
+                if last {
+                    break;
+                }
             }
             None => {
                 break;
             }
-        }    
+        }
     }
     Ok(())
 }
