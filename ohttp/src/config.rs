@@ -182,7 +182,7 @@ impl KeyConfig {
         let kem = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
 
         // Note that the KDF and AEAD doesn't matter here.
-        let kem_config = HpkeConfig::new(kem, Kdf::HkdfSha384, AeadId::Aes128Gcm);
+        let kem_config = HpkeConfig::new(kem, Kdf::HkdfSha384, AeadId::Aes256Gcm);
         if !kem_config.supported() {
             return Err(Error::Unsupported);
         }

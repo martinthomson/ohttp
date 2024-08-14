@@ -11,7 +11,7 @@ use ::hpke as rust_hpke;
 use ::hpke_pq as rust_hpke;
 
 use rust_hpke::{
-    aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, ChaCha20Poly1305},
+    aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, AesGcm256, ChaCha20Poly1305},
     kdf::{HkdfSha256, HkdfSha384},
     kem::{Kem as KemTrait, X25519HkdfSha256, DhP384HkdfSha384},
     setup_receiver, setup_sender, Deserializable, OpModeR, OpModeS, Serializable,
@@ -51,7 +51,7 @@ impl Config {
 
     pub fn supported(self) -> bool {
         // TODO support more options
-        matches!(self.kdf, Kdf::HkdfSha256 | Kdf::HkdfSha384) && matches!(self.aead, Aead::Aes128Gcm | Aead::ChaCha20Poly1305)
+        matches!(self.kdf, Kdf::HkdfSha256 | Kdf::HkdfSha384) && matches!(self.aead, Aead::Aes128Gcm | Aead::Aes256Gcm | Aead::ChaCha20Poly1305)
     }
 }
 
@@ -141,6 +141,7 @@ enum SenderContextX25519HkdfSha256HkdfSha256 {
 
 enum SenderContextDhP384HkdfSha384HkdfSha384 {
     AesGcm128(Box<AeadCtxS<AesGcm128, HkdfSha384, DhP384HkdfSha384>>),
+    AesGcm256(Box<AeadCtxS<AesGcm256, HkdfSha384, DhP384HkdfSha384>>),
 }
 
 #[cfg(feature = "pq")]
@@ -191,6 +192,12 @@ impl SenderContext {
                 let tag = context.seal_in_place_detached(plaintext, aad)?;
                 Vec::from(tag.to_bytes().as_slice())
             }
+            Self::DhP384HkdfSha384(SenderContextDhP384HkdfSha384::HkdfSha384(
+                SenderContextDhP384HkdfSha384HkdfSha384::AesGcm256(context),
+            )) => {
+                let tag = context.seal_in_place_detached(plaintext, aad)?;
+                Vec::from(tag.to_bytes().as_slice())
+            }
             #[cfg(feature = "pq")]
             Self::X25519Kyber768Draft00(SenderContextX25519Kyber768Draft00::HkdfSha256(
                 SenderContextX25519Kyber768Draft00HkdfSha256::AesGcm128(context),
@@ -215,6 +222,11 @@ impl SenderContext {
             }
             Self::DhP384HkdfSha384(SenderContextDhP384HkdfSha384::HkdfSha384(
                 SenderContextDhP384HkdfSha384HkdfSha384::AesGcm128(context),
+            )) => {
+                context.export(info, out_buf)?;
+            }
+            Self::DhP384HkdfSha384(SenderContextDhP384HkdfSha384::HkdfSha384(
+                SenderContextDhP384HkdfSha384HkdfSha384::AesGcm256(context),
             )) => {
                 context.export(info, out_buf)?;
             }
@@ -310,7 +322,15 @@ impl HpkeS {
                 SenderContextDhP384HkdfSha384::HkdfSha384,
                 SenderContextDhP384HkdfSha384HkdfSha384::AesGcm128,
             },
-
+            {
+                Kem::P384Sha384 => DhP384HkdfSha384,
+                Kdf::HkdfSha384 => HkdfSha384,
+                Aead::Aes256Gcm => AesGcm256,
+                PublicKey::P384,
+                SenderContext::DhP384HkdfSha384,
+                SenderContextDhP384HkdfSha384::HkdfSha384,
+                SenderContextDhP384HkdfSha384HkdfSha384::AesGcm256,
+            },
             #[cfg(feature = "pq")]
             {
                 Kem::X25519Kyber768Draft00 => X25519Kyber768Draft00,
@@ -370,6 +390,7 @@ enum ReceiverContextX25519HkdfSha256HkdfSha256 {
 
 enum ReceiverContextDhP384HkdfSha384HkdfSha384 {
     AesGcm128(Box<AeadCtxR<AesGcm128, HkdfSha384, DhP384HkdfSha384>>),
+    AesGcm256(Box<AeadCtxR<AesGcm256, HkdfSha384, DhP384HkdfSha384>>),
 }
 
 #[cfg(feature = "pq")]
@@ -437,6 +458,18 @@ impl ReceiverContext {
                 context.open_in_place_detached(ct, aad, &tag)?;
                 ct
             }
+            Self::DhP384HkdfSha384(ReceiverContextDhP384HkdfSha384::HkdfSha384(
+                ReceiverContextDhP384HkdfSha384HkdfSha384::AesGcm256(context),
+            )) => {
+                if ciphertext.len() < AeadTag::<AesGcm128>::size() {
+                    return Err(Error::Truncated);
+                }
+                let (ct, tag_slice) =
+                    ciphertext.split_at_mut(ciphertext.len() - AeadTag::<AesGcm128>::size());
+                let tag = AeadTag::<AesGcm256>::from_bytes(tag_slice)?;
+                context.open_in_place_detached(ct, aad, &tag)?;
+                ct
+            }
             #[cfg(feature = "pq")]
             Self::X25519Kyber768Draft00(ReceiverContextX25519Kyber768Draft00::HkdfSha256(
                 ReceiverContextX25519Kyber768Draft00HkdfSha256::AesGcm128(context),
@@ -467,6 +500,11 @@ impl ReceiverContext {
             }
             Self::DhP384HkdfSha384(ReceiverContextDhP384HkdfSha384::HkdfSha384(
                 ReceiverContextDhP384HkdfSha384HkdfSha384::AesGcm128(context),
+            )) => {
+                context.export(info, out_buf)?;
+            }
+            Self::DhP384HkdfSha384(ReceiverContextDhP384HkdfSha384::HkdfSha384(
+                ReceiverContextDhP384HkdfSha384HkdfSha384::AesGcm256(context),
             )) => {
                 context.export(info, out_buf)?;
             }
@@ -559,6 +597,15 @@ impl HpkeR {
                 ReceiverContext::DhP384HkdfSha384,
                 ReceiverContextDhP384HkdfSha384::HkdfSha384,
                 ReceiverContextDhP384HkdfSha384HkdfSha384::AesGcm128,
+            },
+            {
+                Kem::P384Sha384 => DhP384HkdfSha384,
+                Kdf::HkdfSha384 => HkdfSha384,
+                Aead::Aes256Gcm => AesGcm256,
+                PrivateKey::P384,
+                ReceiverContext::DhP384HkdfSha384,
+                ReceiverContextDhP384HkdfSha384::HkdfSha384,
+                ReceiverContextDhP384HkdfSha384HkdfSha384::AesGcm256,
             },
 
             #[cfg(feature = "pq")]
