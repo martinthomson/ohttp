@@ -19,6 +19,8 @@ use structopt::StructOpt;
 use warp::hyper::Body;
 use warp::Filter;
 
+use cgpuvm_attest::attest;
+
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Debug, StructOpt)]
@@ -188,6 +190,9 @@ async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
     env_logger::try_init().unwrap();
+    let Some(token) = attest("".as_bytes(), 0xffff) else {panic!("Failed to get MAA token. You must be root to access TPM.")};
+    
+    println!("Fetched MAA token: {}", String::from_utf8(token).unwrap());
 
     let config = KeyConfig::new(
         0,
@@ -198,6 +203,7 @@ async fn main() -> Res<()> {
             SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305),
         ],
     )?;
+
     let ohttp = OhttpServer::new(config)?;
     let config = hex::encode(KeyConfig::encode_list(&[ohttp.config()])?);
 

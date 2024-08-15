@@ -1,0 +1,18 @@
+[package]
+name = "cgpuvm-attest-cli"
+version = "0.1.0"
+authors = ["Antoine Delignat-Lavaud <antdl@microsoft.com>"]
+edition = "2021"
+license = "MIT"
+description = "FFI for Confidential GPU VM Guest Attestation Library"
+repository = "https://github.com/ad-l/ohttp"
+
+[features]
+default = []
+
+[dependencies]
+libc = "0.2.0"
+
+[dependencies.cgpuvm-attest]
+path= "../cgpuvm-attest"
+features = []

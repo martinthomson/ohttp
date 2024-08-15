@@ -8,5 +8,6 @@ members = [
   "ohttp-client-cli",
   "ohttp-server",
   "cgpuvm-attest",
-  "verifier"
+  "verifier",
+  "cgpuvm-attest-cli"
 ]

@@ -27,3 +27,7 @@ features = ["bhttp", "write-http"]
 path= "../ohttp"
 features = ["server"]
 default-features = false
+
+[dependencies.cgpuvm-attest]
+path= "../cgpuvm-attest"
+features = []
