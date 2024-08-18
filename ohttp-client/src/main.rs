@@ -2,7 +2,7 @@
 
 use bhttp::{Message, Mode};
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, Read},
     ops::Deref,
     path::PathBuf,
@@ -35,8 +35,14 @@ struct Args {
     /// If you use an oblivious request resource, this also works, though
     /// you don't get any of the privacy guarantees.
     url: String,
-    /// A hexadecimal version of the key configuration for the target URL.
-    config: HexArg,
+
+    /// json containing the key configuration along with proof
+    #[structopt(long, short = "c")]
+    config: PathBuf,
+
+    /// Trusted KMS service certificate
+    #[structopt(long, short = "k")]
+    kms_cert: PathBuf,
 
     /// Where to read request content.
     /// If you omit this, input is read from `stdin`.
@@ -97,7 +103,9 @@ async fn main() -> Res<()> {
 
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
-    let ohttp_request = ohttp::ClientRequest::from_encoded_config_list(&args.config)?;
+    let config = fs::read_to_string(&args.config)?;
+    let cert = fs::read_to_string(&args.kms_cert)?;
+    let ohttp_request = ohttp::ClientRequest::from_kms_config(&config, &cert)?;
     let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 

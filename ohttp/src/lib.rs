@@ -51,6 +51,8 @@ use crate::rh::{
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
 };
 
+use serde::Deserialize;
+
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
 const REQUEST_HEADER_LEN: usize = size_of::<KeyId>() + 6;
 const INFO_REQUEST: &[u8] = b"message/bhttp request";
@@ -89,6 +91,14 @@ pub struct ClientRequest {
     header: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+struct KmsKeyConfiguration{
+    kid: i32,
+    #[serde(rename = "publicKey")]
+    key_config: String,
+    receipt: String
+}
+
 #[cfg(feature = "client")]
 impl ClientRequest {
     /// Construct a `ClientRequest` from a specific `KeyConfig` instance.
@@ -124,6 +134,21 @@ impl ClientRequest {
         }
     }
 
+    /// Reads a json containing key configurations with receipts and constructs a single use client sender
+    /// from the first supported configuration.
+    /// See `KeyConfig::decode_list` for the structure details.
+    pub fn from_kms_config(config: &str, cert: &str) -> Res<Self> {
+        let mut kms_configs: Vec<KmsKeyConfiguration> = serde_json::from_str(config).unwrap();
+        if let Some(kms_config) = kms_configs.pop() {
+            let _ = verifier::verify(&kms_config.receipt, &cert)?;
+            let encoded_key = hex::decode(&kms_config.key_config).unwrap();
+            let mut config = KeyConfig::decode(&encoded_key)?;
+            Self::from_config(&mut config)
+        } else {
+            Err(Error::Unsupported)
+        }
+    }
+   
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
