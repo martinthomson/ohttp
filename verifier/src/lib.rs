@@ -1,9 +1,9 @@
 
 use base64::engine::general_purpose;
+use openssl::ecdsa::EcdsaSig;
 use serde::Deserialize;
 use base64::{self, Engine};
 use openssl::x509::X509;
-use openssl::sign::Verifier;
 use openssl::hash::{MessageDigest, Hasher};
 use hex;
 mod err;
@@ -95,23 +95,18 @@ fn compute_root(proof: Vec<ProofElement>, leaf: Vec<u8>) -> Res<Vec<u8>> {
 fn check_signature(signing_cert: &str, signature: &str, root: &[u8]) -> Res<bool> {
     // Load the certificate from PEM format
     let certificate = X509::from_pem(signing_cert.as_bytes())?;
-
+    
     // Extract the public key from the certificate
-    let public_key = certificate.public_key()?;
+    let public_key = certificate.public_key()?.ec_key()?;
 
-    // Create a verifier for the specific hash algorithm (e.g., SHA256)
-    let mut verifier = Verifier::new(MessageDigest::sha256(), &public_key)?;
-
-    // Feed the value to the verifier
-    verifier.update(root)?;
-
-    // Verify the signature
+    // Decode the signature 
     let sig = general_purpose::STANDARD.decode(signature)?;
+    let ecdsa_sig = EcdsaSig::from_der(&sig)?;
 
-    println!("sig: {}", hex::encode(&sig));
+    // Verify signature over root
+    let is_valid = ecdsa_sig.verify(&root, &public_key)?;
 
-    let is_valid = verifier.verify(&sig)?;
-     
+    println!("is_signature_valid: {}", is_valid);
     Ok(is_valid)
 }
 
@@ -120,7 +115,7 @@ pub fn verify(receipt_str: &str, service_cert: &str) -> Res<bool> {
     let receipt: Receipt = serde_json::from_str(receipt_str)?;
 
     // Check that the certificate used to sign the receipt is endorsed by the KMS
-    let mut result = check_certificate(&receipt.cert, service_cert)?;
+    let _ = check_certificate(&receipt.cert, service_cert)?;
 
     // Compute leaf
     let leaf = compute_leaf(receipt.leaf_components)?;
@@ -133,10 +128,7 @@ pub fn verify(receipt_str: &str, service_cert: &str) -> Res<bool> {
     println!("root: {}", hex::encode(&root));
 
     // Check signature over the root
-    result = check_signature(&receipt.cert, &receipt.signature, root.as_slice())?;
-
-    println!("Receipt verification passed?: {}", result);
-    
+    let result = check_signature(&receipt.cert, &receipt.signature, &root)?;    
     Ok(result)
 }
 
