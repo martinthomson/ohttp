@@ -93,7 +93,6 @@ pub struct ClientRequest {
 
 #[derive(Deserialize)]
 struct KmsKeyConfiguration{
-    kid: i32,
     #[serde(rename = "publicKey")]
     key_config: String,
     receipt: String

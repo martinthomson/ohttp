@@ -28,8 +28,6 @@ struct LeafComponents {
 struct Receipt {
     signature: String,
     cert: String,
-    node_id: String,
-    is_signature_transaction: bool,
     leaf_components: LeafComponents,
     proof: Vec<ProofElement>
 }
