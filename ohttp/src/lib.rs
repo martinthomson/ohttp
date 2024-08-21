@@ -297,7 +297,6 @@ impl ServerResponse {
                 break;
             }
         }
-        bytes.reverse(); // The most significant chunk should come first
         bytes
     }
 

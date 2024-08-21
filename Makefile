@@ -1,5 +1,7 @@
 TARGET ?= http://127.0.0.1:3000
-INPUT ?= ./examples/request.txt
+INPUT ?= ./examples/audio.txt
+AUDIO_IN ?= ./examples/audio.mp3
+AUDIO_OUT ?= ./examples/audio.txt
 
 ca:
 	./ohttp-server/ca.sh
@@ -18,6 +20,22 @@ build-streaming:
 
 build: build-server build-client build-streaming build-whisper
 
+run-server:
+	cargo run --bin ohttp-server -- --certificate ./ohttp-server/server.crt \
+		--key ./ohttp-server/server.key --target ${TARGET}
+
+run-whisper:
+	docker run --network=host whisper-api 
+
+run-server-streaming:
+	docker compose -f ./docker/docker-compose-streaming.yml up
+
+run-server-whisper:
+	docker compose -f ./docker/docker-compose-whisper.yml up
+
+generate-audio: 
+	python3 examples/audio.py --input ${AUDIO_IN} --output ${AUDIO_OUT}
+
 run-client-kms: ca
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
   'https://localhost:9443/score' -i ${INPUT} \
@@ -28,8 +46,3 @@ run-client-local: ca
   'https://localhost:9443/score' -i ${INPUT} \
   --config `curl -s -k https://localhost:9443/discover`
 
-run-server-streaming:
-	docker compose -f ./docker/docker-compose-streaming.yml up
-
-run-server-whisper:
-	docker compose -f ./docker/docker-compose-whisper.yml up
