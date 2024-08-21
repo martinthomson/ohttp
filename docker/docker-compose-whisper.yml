@@ -7,7 +7,7 @@ services:
     environment:
       - TARGET=http://localhost:3000
     depends_on:
-      - web_service
+      - whisper
 
   whisper:
     image: whisper-api
