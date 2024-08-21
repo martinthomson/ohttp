@@ -9,7 +9,7 @@ ca:
 build-whisper:
 	docker build -f docker/whisper/Dockerfile -t whisper-api ./docker/whisper
 
-build-server:
+build-server: ca
 	docker build -f docker/server/Dockerfile -t ohttp-server .
 
 build-client:
@@ -20,7 +20,7 @@ build-streaming:
 
 build: build-server build-client build-streaming build-whisper
 
-run-server:
+run-server: ca
 	cargo run --bin ohttp-server -- --certificate ./ohttp-server/server.crt \
 		--key ./ohttp-server/server.key --target ${TARGET}
 

@@ -1,7 +1,7 @@
-FROM rust:1.70 as builder
+FROM rust:1.80 as builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -yq libssl-dev
+RUN apt-get update && apt-get install -yq openssl libssl-dev
 
 WORKDIR /usr/src/ohttp
 COPY . .
