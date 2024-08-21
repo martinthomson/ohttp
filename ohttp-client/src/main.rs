@@ -158,7 +158,7 @@ async fn main() -> Res<()> {
                 if args.binary {
                     response.write_bhttp(args.mode(), &mut output)?;
                 } else {
-                    response.write_http(&mut output)?;
+                    output.write_all(response.content())?;
                 }
 
                 if last {
