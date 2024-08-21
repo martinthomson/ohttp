@@ -2,17 +2,13 @@
 
 use bhttp::{Message, Mode};
 use std::{
-    fs::{self, File},
-    io::{self, Read},
-    ops::Deref,
-    path::PathBuf,
-    str::FromStr,
+    fs::{self, File}, io::{self, Read}, ops::Deref, path::PathBuf, str::FromStr
 };
 use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HexArg(Vec<u8>);
 impl FromStr for HexArg {
     type Err = hex::FromHexError;
@@ -36,13 +32,17 @@ struct Args {
     /// you don't get any of the privacy guarantees.
     url: String,
 
-    /// json containing the key configuration along with proof
+    /// key configuration
     #[structopt(long, short = "c")]
-    config: PathBuf,
+    config: Option<HexArg>,
+
+    /// json containing the key configuration along with proof
+    #[structopt(long, short = "f")]
+    kms_config: Option<PathBuf>,
 
     /// Trusted KMS service certificate
     #[structopt(long, short = "k")]
-    kms_cert: PathBuf,
+    kms_cert: Option<PathBuf>,
 
     /// Where to read request content.
     /// If you omit this, input is read from `stdin`.
@@ -103,9 +103,17 @@ async fn main() -> Res<()> {
 
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
-    let config = fs::read_to_string(&args.config)?;
-    let cert = fs::read_to_string(&args.kms_cert)?;
-    let ohttp_request = ohttp::ClientRequest::from_kms_config(&config, &cert)?;
+
+    let ohttp_request = if let Some(kms_config) = &args.kms_config {
+        let config = fs::read_to_string(kms_config)?;
+        let kms_cert = &args.kms_cert.clone().expect("KMS cert expected");
+        let cert = fs::read_to_string(kms_cert)?;
+        ohttp::ClientRequest::from_kms_config(&config, &cert)?
+    } else {
+        let config = &args.config.clone().expect("Config expected.");
+        ohttp::ClientRequest::from_encoded_config_list(config)?
+    };
+    
     let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Request: {}", hex::encode(&enc_request));
 
@@ -143,7 +151,9 @@ async fn main() -> Res<()> {
         match response.chunk().await? {
             Some(chunk) => {
                 println!("Decapsulating {}, {}", chunk.len(), hex::encode(&chunk));
-                let (response_buf, last) = ohttp_response.decapsulate_chunk(&chunk);
+                let (response_buf, last) = 
+                    ohttp_response.decapsulate_chunk(&chunk);
+
                 let buf = response_buf.unwrap();
                 let response = Message::read_bhttp(&mut std::io::Cursor::new(&buf[..]))?;
                 if args.binary {
@@ -151,6 +161,7 @@ async fn main() -> Res<()> {
                 } else {
                     response.write_http(&mut output)?;
                 }
+
                 if last {
                     break;
                 }
