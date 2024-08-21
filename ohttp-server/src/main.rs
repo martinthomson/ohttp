@@ -19,9 +19,37 @@ use structopt::StructOpt;
 use warp::hyper::Body;
 use warp::Filter;
 
+use tokio::time::sleep;
+use tokio::time::Duration;
+
+use reqwest::Client;
 use cgpuvm_attest::attest;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+use serde_json::from_str;
+use serde::Deserialize;
+use hpke::Deserializable;
+
+#[derive(Deserialize)]
+struct ExportedKey {
+    kid: u8,
+    key: String,
+    receipt: String
+}
+
+#[derive(Deserialize)]
+struct JwkKey {
+    crv: String,
+    d: String,
+    kid: String,
+    kty: String,
+    x: String,
+    y: String,
+    timestamp: u64,
+    id: u8,
+    receipt: String
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ohttp-server", about = "Serve oblivious HTTP requests.")]
@@ -190,13 +218,55 @@ async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
     env_logger::try_init().unwrap();
-    let Some(token) = attest("".as_bytes(), 0xffff) else {panic!("Failed to get MAA token. You must be root to access TPM.")};
-    
-    println!("Fetched MAA token: {}", String::from_utf8(token).unwrap());
 
-    let config = KeyConfig::new(
-        0,
+    // Get MAA token from CVM guest attestation library
+    let Some(tok) = attest("{}".as_bytes(), 0xffff) else {panic!("Failed to get MAA token. You must be root to access TPM.")};
+    let token = String::from_utf8(tok).unwrap();
+    println!("Fetched MAA token: {}", token);
+
+    let client = Client::builder().danger_accept_invalid_certs(true).build()?;
+
+    // Retrying logic for receipt
+    let max_retries = 3;
+    let mut retries = 0;
+    let mut key : String = "".to_string();
+
+    loop {
+        // Get HPKE private key from Azure KMS
+        let response = client.post("https://acceu-aml-504.confidential-ledger.azure.com/key")
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        // We may have to wait for receipt to be ready
+        if response.status() == 202 {
+            if retries < max_retries {
+                retries += 1;
+                println!("Received 202 status code, retrying... (attempt {}/{})", retries, max_retries);
+                sleep(Duration::from_secs(1)).await;
+            } else {
+                panic!("Max retries reached, giving up. Cannot reach key management service");
+            }
+        } else {
+            let skr_body = response.text().await?;
+            let skr : ExportedKey = from_str(&skr_body).expect("Failed to deserialize SKR response. Check KMS version");
+
+            println!("SKR successful, KID={}, Receipt={}, Key={}", skr.kid, skr.receipt, skr.key);
+            key = skr.key;
+            break;
+        }
+    }
+
+    let jwk: JwkKey = from_str(&key).expect("Failed to deserialize JWK!");
+    println!("Extracted secret D={}", jwk.d);
+    let d = base64_url::decode(&jwk.d).expect("Invalide base64-encoded private exponent");
+    let sk = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::PrivateKey::from_bytes(&d).expect("Failed to create HPKE private key");
+    let pk = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::sk_to_pk(&sk);
+
+    let config = KeyConfig::import_p384(
+        jwk.id,
         Kem::P384Sha384,
+        sk, pk,
         vec![
             SymmetricSuite::new(Kdf::HkdfSha384, Aead::Aes256Gcm),
             SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm),
@@ -206,8 +276,8 @@ async fn main() -> Res<()> {
 
     let ohttp = OhttpServer::new(config)?;
     let config = hex::encode(KeyConfig::encode_list(&[ohttp.config()])?);
-
     println!("Config: {}", config);
+    
     let mode = args.mode();
     let target = args.target;
 
