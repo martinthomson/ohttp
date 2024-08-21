@@ -150,7 +150,6 @@ async fn main() -> Res<()> {
     loop {
         match response.chunk().await? {
             Some(chunk) => {
-                println!("Decapsulating {}, {}", chunk.len(), hex::encode(&chunk));
                 let (response_buf, last) = 
                     ohttp_response.decapsulate_chunk(&chunk);
 
