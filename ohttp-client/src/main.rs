@@ -6,6 +6,7 @@ use std::{
 };
 use std::io::Cursor;
 use structopt::StructOpt;
+use reqwest::Client;
 use colored::*;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -40,7 +41,7 @@ struct Args {
 
     /// json containing the key configuration along with proof
     #[structopt(long, short = "f")]
-    kms_config: Option<PathBuf>,
+    kms_url: Option<String>,
 
     /// Trusted KMS service certificate
     #[structopt(long, short = "k")]
@@ -109,6 +110,25 @@ fn create_multipart_request(file: &PathBuf) -> Res<Vec<u8>> {
     Ok(request)
 }
 
+// Get key configuration from KMS
+async fn get_kms_config(kms_url: String, cert: &str) -> Res<String> {
+   // Create a client with the CA certificate
+   let client = Client::builder()
+        .danger_accept_invalid_certs(true)
+        .add_root_certificate(reqwest::Certificate::from_pem(cert.as_bytes())?)
+        .build()?;
+
+    // Make the GET request
+    let response = client.get(kms_url + "/listpubkeys")
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let body = response.text().await?;
+    println!("Response Body: {}", body);
+    Ok(body)
+}
+
 #[tokio::main]
 async fn main() -> Res<()> {
     let args = Args::from_args();
@@ -137,10 +157,10 @@ async fn main() -> Res<()> {
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
 
-    let ohttp_request = if let Some(kms_config) = &args.kms_config {
-        let config = fs::read_to_string(kms_config)?;
+    let ohttp_request = if let Some(kms_url) = &args.kms_url {
         let kms_cert = &args.kms_cert.clone().expect("KMS cert expected");
         let cert = fs::read_to_string(kms_cert)?;
+        let config = get_kms_config(kms_url.to_string(), &cert).await?;
         ohttp::ClientRequest::from_kms_config(&config, &cert)?
     } else {
         let config = &args.config.clone().expect("Config expected.");
