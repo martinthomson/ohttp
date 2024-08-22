@@ -2,8 +2,9 @@
 
 use bhttp::{Message, Mode};
 use std::{
-    fs::{self, File}, io::{self, Read}, ops::Deref, path::PathBuf, str::FromStr
+    fs::{self, File}, io::{self, Read, Write}, ops::Deref, path::PathBuf, str::FromStr
 };
+use std::io::Cursor;
 use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -77,6 +78,36 @@ impl Args {
     }
 }
 
+// Create a multi-part request from a file
+fn create_multipart_request(file: &PathBuf) -> Res<Vec<u8>> {
+    // Define boundary for multipart
+    let boundary = "----ConfidentialInferencingFormBoundary7MA4YWxkTrZu0gW";
+
+    // Load audio file
+    let mut file = File::open(file)?;
+    let mut file_contents = Vec::new();
+    file.read_to_end(&mut file_contents)?;
+
+    // Create multipart body
+    let mut body = Vec::new();
+    write!(
+        &mut body,
+        "--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.mp3\"\r\nContent-Type: {}\r\n\r\n",
+        boundary,
+        "audio/mp3"
+    )?;
+    body.extend_from_slice(&file_contents);
+    write!(&mut body, "\r\n--{}--\r\n", boundary)?;
+
+    let mut request = Vec::new();
+    write!(&mut request, "POST /whisper HTTP/1.1\r\n")?;
+    write!(&mut request, "Content-Type: multipart/form-data; boundary={}\r\n", boundary)?;
+    write!(&mut request, "Content-Length: {}\r\n", body.len())?;
+    write!(&mut request, "\r\n")?;
+    request.append(&mut body);
+    Ok(request)
+}
+
 #[tokio::main]
 async fn main() -> Res<()> {
     let args = Args::from_args();
@@ -84,11 +115,12 @@ async fn main() -> Res<()> {
     env_logger::try_init().unwrap();
 
     let request = if let Some(infile) = &args.input {
-        let mut r = io::BufReader::new(File::open(infile)?);
+        let request = create_multipart_request(infile)?;
+        let mut cursor = Cursor::new(request);
         if args.binary {
-            Message::read_bhttp(&mut r)?
+            Message::read_bhttp(&mut cursor)?
         } else {
-            Message::read_http(&mut r)?
+            Message::read_http(&mut cursor)?
         }
     } else {
         let mut buf = Vec::new();

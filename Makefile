@@ -1,7 +1,5 @@
 TARGET ?= http://127.0.0.1:3000
-INPUT ?= ./examples/audio.txt
-AUDIO_IN ?= ./examples/audio.mp3
-AUDIO_OUT ?= ./examples/audio.txt
+INPUT ?= ./examples/audio.mp3
 
 ca:
 	./ohttp-server/ca.sh
@@ -32,9 +30,6 @@ run-server-streaming:
 
 run-server-whisper:
 	docker compose -f ./docker/docker-compose-whisper.yml up
-
-generate-audio: 
-	python3 examples/audio.py --input ${AUDIO_IN} --output ${AUDIO_OUT}
 
 run-client-kms: ca
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
