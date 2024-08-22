@@ -31,6 +31,8 @@ use serde_json::from_str;
 use serde::Deserialize;
 use hpke::Deserializable;
 
+const CHUNK_SIZE: usize = 16000;
+
 #[derive(Deserialize)]
 struct ExportedKey {
     kid: u8,
@@ -140,44 +142,47 @@ async fn score(
             let response_nonce = server_response.response_nonce();
             let nonce_stream = once(async { response_nonce });
 
-            let chunk_stream = unfold(
-                (true, None, response, server_response, mode),
-                |(first, chunk, mut response, mut server_response, mode)| async move {
-                    let chunk = if first {
-                        response.chunk().await.unwrap()
-                    } else {
-                        chunk
-                    };
-                    let Some(chunk) = chunk else { return None };
-                    println!(
-                        "Processing chunk {} {}",
-                        first,
-                        std::str::from_utf8(&chunk).unwrap()
-                    );
-                    let mut bin_response = Message::response(StatusCode::OK);
-                    bin_response.write_content(chunk);
-                    let mut chunked_response = Vec::new();
-                    bin_response
-                        .write_bhttp(mode, &mut chunked_response)
-                        .unwrap();
+            let chunk_stream = unfold((true, None, response, server_response, mode), 
+                |(first, mut chunk, mut response, mut server_response, mode)| async move {
 
-                    let (next_chunk, last, err) = match response.chunk().await {
-                        Ok(Some(c)) => (Some(c), false, None),
-                        Ok(None) => (None, true, None),
-                        Err(_) => (None, true, Some(ohttp::Error::Truncated)),
-                    };
+                    if first {chunk = response.chunk().await.unwrap();}
+                    let Some(mut chunk) = chunk else { return None };
 
-                    if let Some(_) = err {
-                        return None;
-                    };
-                    let enc_response = server_response
-                        .encapsulate_chunk(&chunked_response, last)
-                        .unwrap();
-                    Some((
-                        Ok::<Vec<u8>, ohttp::Error>(enc_response),
-                        (false, next_chunk, response, server_response, mode),
-                    ))
-                },
+                    println!("Processing chunk {} {}",first,std::str::from_utf8(&chunk).unwrap());
+                
+                    while !chunk.is_empty() {
+                        // Determine the size of the next chunk part
+                        let size = std::cmp::min(CHUNK_SIZE, chunk.len());
+                        // Split the chunk into a part to process and the remainder
+                        let (chunk_part, remaining_chunk) = chunk.split_at(size);
+
+                        let mut bin_response = Message::response(StatusCode::OK);
+                        bin_response.write_content(chunk_part);
+                        let mut chunked_response = Vec::new();
+                        bin_response.write_bhttp(mode, &mut chunked_response).unwrap();
+
+                        let (next_chunk, last_major, err) = match response.chunk().await {
+                            Ok(Some(c)) => (Some(c), false, None),
+                            Ok(None) => (None, true, None),
+                            Err(_) => (None, true, Some(ohttp::Error::Truncated))
+                        };
+
+                        if let Some(_) = err { return None };
+                        let mut last = false;
+
+                        // If there's remaining data, continue with it; otherwise, proceed to the next chunk
+                        if !remaining_chunk.is_empty() {
+                            chunk = remaining_chunk.to_vec().into();
+                        } else {
+                            chunk = next_chunk.unwrap_or_default();
+                            if last_major {last = true;}
+                        }
+
+                        let enc_response = server_response.encapsulate_chunk(&chunked_response, last).unwrap();
+                        return Some((Ok::<Vec<u8>, ohttp::Error>(enc_response), (false, Some(chunk), response, server_response, mode)));
+                    }
+                None
+            }
             );
 
             let stream = nonce_stream.chain(chunk_stream);
