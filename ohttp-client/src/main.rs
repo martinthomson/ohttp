@@ -6,6 +6,7 @@ use std::{
 };
 use std::io::Cursor;
 use structopt::StructOpt;
+use colored::*;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -145,9 +146,12 @@ async fn main() -> Res<()> {
         let config = &args.config.clone().expect("Config expected.");
         ohttp::ClientRequest::from_encoded_config_list(config)?
     };
-    
+
+    println!("Press any key to continue...");
+    std::io::stdin().read(&mut [0u8]).unwrap();
+
     let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
-    println!("Request: {}", hex::encode(&enc_request));
+    println!("{} {}...", "Sending encapsulated OHTTP request: ".green(), hex::encode(&enc_request[0..100]));
 
     let client = match &args.trust {
         Some(pem) => {

@@ -9,7 +9,7 @@ use hex;
 mod err;
 pub use crate::err::Error;
 pub use crate::err::Res;
-
+use colored::*;
 
 #[derive(Deserialize)]
 struct ProofElement {
@@ -33,6 +33,8 @@ struct Receipt {
 }
 
 fn check_certificate(cert: &str, service_cert_pem: &str) -> Res<bool> {
+    println!("  {}\n{}", "Checking KMS certificate...".red(), cert);
+
     // Load the endorser certificate from PEM
     let service_cert = X509::from_pem(service_cert_pem.as_bytes())?;
 
@@ -44,7 +46,9 @@ fn check_certificate(cert: &str, service_cert_pem: &str) -> Res<bool> {
 
     // Verify the endorsed certificate using the endorser's public key
     let result = endorsed_cert.verify(&public_key)?;
-    
+
+    println!("  {}", "KMS certificate verified.".green());
+
     Ok(result)
 }
 
@@ -54,9 +58,9 @@ fn compute_leaf(leaf_components: LeafComponents) -> Res<Vec<u8>> {
     hasher.update(leaf_components.commit_evidence.as_bytes())?;
     let mut commit_evidence_digest = hasher.finish()?.to_vec();
 
-    println!("write_set_digest: {}", leaf_components.write_set_digest);
-    println!("commit_evidence_digest: {}", hex::encode(&commit_evidence_digest));
-    println!("claims_digest: {}", leaf_components.claims_digest);
+    println!("  {} {}", "write_set_digest: ".yellow(), leaf_components.write_set_digest);
+    println!("  {} {}", "commit_evidence_digest: ".yellow(), hex::encode(&commit_evidence_digest));
+    println!("  {} {}", "claims_digest: ".yellow(), leaf_components.claims_digest);
     
     // Concatenate write_set_digest, commit_evidence_digest, and claims_digest
     let mut claims_digest_bytes = hex::decode(leaf_components.claims_digest.clone())?;
@@ -91,6 +95,8 @@ fn compute_root(proof: Vec<ProofElement>, leaf: Vec<u8>) -> Res<Vec<u8>> {
 }
 
 fn check_signature(signing_cert: &str, signature: &str, root: &[u8]) -> Res<bool> {
+    println!("  {}", "Checking receipt signature...".red());
+
     // Load the certificate from PEM format
     let certificate = X509::from_pem(signing_cert.as_bytes())?;
     
@@ -104,7 +110,7 @@ fn check_signature(signing_cert: &str, signature: &str, root: &[u8]) -> Res<bool
     // Verify signature over root
     let is_valid = ecdsa_sig.verify(&root, &public_key)?;
 
-    println!("is_signature_valid: {}", is_valid);
+    println!("  {}", "Receipt signature valid.".green());
     Ok(is_valid)
 }
 
@@ -118,12 +124,12 @@ pub fn verify(receipt_str: &str, service_cert: &str) -> Res<bool> {
     // Compute leaf
     let leaf = compute_leaf(receipt.leaf_components)?;
 
-    println!("leaf: {}", hex::encode(&leaf));
+    println!("  {} {}", "leaf: ".yellow(), hex::encode(&leaf));
 
     // Compute root using leaf and proof
     let root = compute_root(receipt.proof, leaf)?;
 
-    println!("root: {}", hex::encode(&root));
+    println!("  {} {}", "root: ".yellow(), hex::encode(&root));
 
     // Check signature over the root
     let result = check_signature(&receipt.cert, &receipt.signature, &root)?;    

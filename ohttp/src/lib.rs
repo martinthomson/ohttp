@@ -52,6 +52,7 @@ use crate::rh::{
 };
 
 use serde::Deserialize;
+use colored::*;
 
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
 const REQUEST_HEADER_LEN: usize = size_of::<KeyId>() + 6;
@@ -139,9 +140,18 @@ impl ClientRequest {
     pub fn from_kms_config(config: &str, cert: &str) -> Res<Self> {
         let mut kms_configs: Vec<KmsKeyConfiguration> = serde_json::from_str(config).unwrap();
         if let Some(kms_config) = kms_configs.pop() {
+
+            println!("{}", "Verifying KMS receipt...".red());
+            
             let _ = verifier::verify(&kms_config.receipt, &cert)?;
+            
+            println!("{}", "Receipt verified.".green());
+            
             let encoded_key = hex::decode(&kms_config.key_config).unwrap();
             let mut config = KeyConfig::decode(&encoded_key)?;
+            
+            println!("{} {}", "Using verified HPKE configuration: ".green(), &kms_config.key_config);
+            
             Self::from_config(&mut config)
         } else {
             Err(Error::Unsupported)
