@@ -73,7 +73,7 @@ struct Args {
     key: PathBuf,
 
     /// Target server
-    #[structopt(long, short = "t", default_value = "http://127.0.0.1:5678")]
+    #[structopt(long, short = "t", default_value = "http://127.0.0.1:8000")]
     target: Url,
 }
 
