@@ -11,6 +11,8 @@ use colored::*;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
+const DEFAULT_KMS_URL: &str ="https://acceu-aml-504.confidential-ledger.azure.com";
+
 #[derive(Debug, Clone)]
 struct HexArg(Vec<u8>);
 impl FromStr for HexArg {
@@ -114,7 +116,6 @@ fn create_multipart_request(file: &PathBuf) -> Res<Vec<u8>> {
 async fn get_kms_config(kms_url: String, cert: &str) -> Res<String> {
    // Create a client with the CA certificate
    let client = Client::builder()
-        .danger_accept_invalid_certs(true)
         .add_root_certificate(reqwest::Certificate::from_pem(cert.as_bytes())?)
         .build()?;
 
@@ -125,7 +126,7 @@ async fn get_kms_config(kms_url: String, cert: &str) -> Res<String> {
         .error_for_status()?;
 
     let body = response.text().await?;
-    println!("Response Body: {}", body);
+    assert!(body.len()> 0);
     Ok(body)
 }
 
@@ -157,9 +158,9 @@ async fn main() -> Res<()> {
     let mut request_buf = Vec::new();
     request.write_bhttp(Mode::KnownLength, &mut request_buf)?;
 
-    let ohttp_request = if let Some(kms_url) = &args.kms_url {
-        let kms_cert = &args.kms_cert.clone().expect("KMS cert expected");
+    let ohttp_request = if let Some(kms_cert) = &args.kms_cert {
         let cert = fs::read_to_string(kms_cert)?;
+        let kms_url = &args.kms_url.clone().unwrap_or(DEFAULT_KMS_URL.to_string());
         let config = get_kms_config(kms_url.to_string(), &cert).await?;
         ohttp::ClientRequest::from_kms_config(&config, &cert)?
     } else {

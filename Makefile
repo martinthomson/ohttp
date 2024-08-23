@@ -38,7 +38,7 @@ service-cert:
 run-client-kms: ca service-cert
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
   'https://localhost:9443/score' -i ${INPUT} \
-  --kms-url ${KMS} --kms-cert ./service_cert.pem 
+  --kms-cert ./service_cert.pem 
 
 run-client-local: ca
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
