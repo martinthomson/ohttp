@@ -1,0 +1,16 @@
+services:
+  server:
+    image: ohttp-server
+    ports:
+      - "9443:9443"
+    network_mode: "host"
+    environment:
+      - TARGET=http://localhost:8000
+    depends_on:
+      - whisper
+
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cuda
+    network_mode: "host"
+    ports:
+      - "8000:8000"

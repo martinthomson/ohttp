@@ -37,6 +37,10 @@ struct Args {
     /// you don't get any of the privacy guarantees.
     url: String,
 
+    /// Target path of the oblivious resource
+    #[structopt(long, short = "p")]
+    target_path: String,
+
     /// key configuration
     #[structopt(long, short = "c")]
     config: Option<HexArg>,
@@ -83,7 +87,7 @@ impl Args {
 }
 
 // Create a multi-part request from a file
-fn create_multipart_request(file: &PathBuf) -> Res<Vec<u8>> {
+fn create_multipart_request(target_path: &str, file: &PathBuf) -> Res<Vec<u8>> {
     // Define boundary for multipart
     let boundary = "----ConfidentialInferencingFormBoundary7MA4YWxkTrZu0gW";
 
@@ -104,7 +108,9 @@ fn create_multipart_request(file: &PathBuf) -> Res<Vec<u8>> {
     write!(&mut body, "\r\n--{}--\r\n", boundary)?;
 
     let mut request = Vec::new();
-    write!(&mut request, "POST /v1/audio/transcriptions HTTP/1.1\r\n")?;
+    write!(&mut request, "POST {} HTTP/1.1\r\n", target_path)?;
+    write!(&mut request, "openai-internal-authtoken: \"testtoken\"\r\n")?;
+    write!(&mut request, "openai-internal-enableasrsupport: \"true\"\r\n")?;
     write!(&mut request, "Content-Type: multipart/form-data; boundary={}\r\n", boundary)?;
     write!(&mut request, "Content-Length: {}\r\n", body.len())?;
     write!(&mut request, "\r\n")?;
@@ -137,7 +143,7 @@ async fn main() -> Res<()> {
     env_logger::try_init().unwrap();
 
     let request = if let Some(infile) = &args.input {
-        let request = create_multipart_request(infile)?;
+        let request = create_multipart_request(&args.target_path, infile)?;
         let mut cursor = Cursor::new(request);
         if args.binary {
             Message::read_bhttp(&mut cursor)?

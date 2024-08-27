@@ -1,5 +1,6 @@
 KMS ?= https://acceu-aml-504.confidential-ledger.azure.com
 TARGET ?= http://127.0.0.1:3000
+TARGET_PATH ?= '/v1/audio/transcriptions'
 INPUT ?= ./examples/audio.mp3
 
 ca:
@@ -32,16 +33,19 @@ run-server-streaming:
 run-server-whisper:
 	docker compose -f ./docker/docker-compose-whisper.yml up
 
+run-server-faster:
+	docker compose -f ./docker/docker-compose-faster-whisper.yml up
+
 service-cert:
 	curl -s -k ${KMS}/node/network | jq -r .service_certificate > service_cert.pem
 
 run-client-kms: ca service-cert
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
-  'https://localhost:9443/score' -i ${INPUT} \
+  'https://localhost:9443/score' --target-path ${TARGET_PATH} -i ${INPUT} \
   --kms-cert ./service_cert.pem 
 
 run-client-local: ca
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
-  'https://localhost:9443/score' -i ${INPUT} \
+  'https://localhost:9443/score' --target-path ${TARGET_PATH} -i ${INPUT} \
   --config `curl -s -k https://localhost:9443/discover`
 

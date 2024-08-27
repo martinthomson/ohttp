@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ghcr.io/microsoft/ccf/app/run/sgx:ccf-5.0.0
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -yq \
 ca-certificates coreutils curl git make mercurial \
