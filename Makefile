@@ -39,7 +39,10 @@ run-server-faster:
 service-cert:
 	curl -s -k ${KMS}/node/network | jq -r .service_certificate > service_cert.pem
 
-run-client-kms: ca service-cert
+verify-quote:
+	verify_quote.sh ${KMS} --cacert service_cert.pem
+	
+run-client-kms: ca service-cert verify-quote
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
   'https://localhost:9443/score' --target-path ${TARGET_PATH} -i ${INPUT} \
   --kms-cert ./service_cert.pem 
