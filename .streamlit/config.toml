@@ -1,0 +1,10 @@
+[server]
+port = 443
+sslCertFile = "examples/server.pem"
+sslKeyFile = "examples/server.key"
+
+[browser]
+serverAddress = "confidential-whisper.ht.vc"
+
+[theme]
+base = "dark"

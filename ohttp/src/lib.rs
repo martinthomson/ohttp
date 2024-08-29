@@ -141,16 +141,16 @@ impl ClientRequest {
         let mut kms_configs: Vec<KmsKeyConfiguration> = serde_json::from_str(config).unwrap();
         if let Some(kms_config) = kms_configs.pop() {
 
-            println!("{}", "Verifying KMS receipt...".red());
+            println!("{}", "Establishing trust in key management service...".red());
             
             let _ = verifier::verify(&kms_config.receipt, &cert)?;
             
-            println!("{}", "Receipt verified.".green());
+            println!("{}", "The receipt for the generation of the OHTTP key is valid.".green());
             
             let encoded_key = hex::decode(&kms_config.key_config).unwrap();
             let mut config = KeyConfig::decode(&encoded_key)?;
             
-            println!("{} {}", "Using verified HPKE configuration: ".green(), &kms_config.key_config);
+            println!("\n{} {}\n", "Loaded OHTTP public key configuration: ".green(), &kms_config.key_config);
             
             Self::from_config(&mut config)
         } else {

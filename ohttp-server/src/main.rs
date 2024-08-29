@@ -28,6 +28,8 @@ use cgpuvm_attest::attest;
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 use serde_json::from_str;
+use serde_cbor::Value;
+
 use serde::Deserialize;
 use hpke::Deserializable;
 
@@ -37,19 +39,6 @@ const CHUNK_SIZE: usize = 16000;
 struct ExportedKey {
     kid: u8,
     key: String,
-    receipt: String
-}
-
-#[derive(Deserialize)]
-struct JwkKey {
-    crv: String,
-    d: String,
-    kid: String,
-    kty: String,
-    x: String,
-    y: String,
-    timestamp: u64,
-    id: u8,
     receipt: String
 }
 
@@ -206,10 +195,10 @@ async fn score(
 }
 
 #[allow(clippy::unused_async)]
-async fn discover(config: String) -> Result<impl warp::Reply, std::convert::Infallible> {
+async fn discover(config: String, token: String) -> Result<impl warp::Reply, std::convert::Infallible> {
     Ok(warp::http::Response::builder()
         .status(200)
-        .body(Vec::from(config)))
+        .body(Vec::from(token)))
 }
 
 fn with_ohttp(
@@ -234,7 +223,8 @@ async fn main() -> Res<()> {
     // Retrying logic for receipt
     let max_retries = 3;
     let mut retries = 0;
-    let mut key : String = "".to_string();
+    let key : String;
+    let mut kid : u8 = 0;
 
     loop {
         // Get HPKE private key from Azure KMS
@@ -261,15 +251,45 @@ async fn main() -> Res<()> {
             break;
         }
     }
+    let cwk = hex::decode(&key).expect("Failed to decode hex key");
+    let cwk_map : Value = serde_cbor::from_slice(&cwk).expect("Invalid CBOR in key from KMS");
+    let mut d = None;
 
-    let jwk: JwkKey = from_str(&key).expect("Failed to deserialize JWK!");
-    println!("Extracted secret D={}", jwk.d);
-    let d = base64_url::decode(&jwk.d).expect("Invalide base64-encoded private exponent");
-    let sk = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::PrivateKey::from_bytes(&d).expect("Failed to create HPKE private key");
-    let pk = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::sk_to_pk(&sk);
+    // Parse the returned CBOR key (in CWK-like format)
+    if let Value::Map(map) = cwk_map {
+        for (key, value) in map {
+            if let Value::Integer(key) = key {
+                match key {
+                    // key identifier
+                    4 => if let Value::Integer(k) = value {
+                        kid = k as u8
+                    } else { panic!("Bad KID"); },
+
+                    // private exponent
+                    -4 => if let Value::Bytes(vec) = value {
+                          d = Some(vec)
+                        } else { panic!("Invalid private key"); },
+
+                    // key type, must be P-384(2)
+                    -1 => if value == Value::Integer(2) {} else {panic!("Bad CBOR key type, expected P-384(2)");},
+
+                    // Ignore public key (x,y) as we recompute it from d anyway
+                    -2 | -3 => (),
+
+                    _ => panic!("Unexpected field in exported private key from KMS")
+                };
+            };
+        }
+    } else { panic!("Incorrect CBOR encoding in returned private key"); };
+
+    let (sk, pk) = if let Some(key) = d {
+        let s = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::PrivateKey::from_bytes(&key).expect("Failed to create HPKE private key");
+        let p = <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::sk_to_pk(&s);
+        (s,p)
+    } else { panic!("Missing private exponent in key returned from KMS"); };
 
     let config = KeyConfig::import_p384(
-        jwk.id,
+        kid,
         Kem::P384Sha384,
         sk, pk,
         vec![
@@ -299,6 +319,7 @@ async fn main() -> Res<()> {
         .and(warp::path("discover"))
         .and(warp::path::end())
         .and(warp::any().map(move || config.clone()))
+        .and(warp::any().map(move || token.clone()))
         .and_then(discover);
 
     let routes = score.or(discover);

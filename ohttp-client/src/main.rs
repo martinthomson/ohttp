@@ -125,6 +125,8 @@ async fn get_kms_config(kms_url: String, cert: &str) -> Res<String> {
         .add_root_certificate(reqwest::Certificate::from_pem(cert.as_bytes())?)
         .build()?;
 
+    println!("Contacting key management service at {}...", kms_url);
+
     // Make the GET request
     let response = client.get(kms_url + "/listpubkeys")
         .send()
@@ -141,6 +143,8 @@ async fn main() -> Res<()> {
     let args = Args::from_args();
     ::ohttp::init();
     env_logger::try_init().unwrap();
+
+    println!("\n================== STEP 1 ==================");
 
     let request = if let Some(infile) = &args.input {
         let request = create_multipart_request(&args.target_path, infile)?;
@@ -174,11 +178,12 @@ async fn main() -> Res<()> {
         ohttp::ClientRequest::from_encoded_config_list(config)?
     };
 
-    println!("Press any key to continue...");
-    std::io::stdin().read(&mut [0u8]).unwrap();
+    //println!("Press any key to continue...");
+    //std::io::stdin().read(&mut [0u8]).unwrap();
 
+    println!("\n================== STEP 2 ==================");
     let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
-    println!("{} {}...", "Sending encapsulated OHTTP request: ".green(), hex::encode(&enc_request[0..100]));
+    println!("Sending encrypted OHTTP request to {}: {}", args.url, hex::encode(&enc_request[0..60]));
 
     let client = match &args.trust {
         Some(pem) => {
@@ -190,7 +195,7 @@ async fn main() -> Res<()> {
                 .add_root_certificate(cert)
                 .build()?
         }
-        None => reqwest::ClientBuilder::new().build()?,
+        None => reqwest::ClientBuilder::new().danger_accept_invalid_certs(true).build()?,
     };
 
     let mut response = client
@@ -213,6 +218,7 @@ async fn main() -> Res<()> {
     loop {
         match response.chunk().await? {
             Some(chunk) => {
+                println!("Decrypting OHTTP chunk: {}\n", hex::encode(&chunk[0..60]));
                 let (response_buf, last) = 
                     ohttp_response.decapsulate_chunk(&chunk);
 

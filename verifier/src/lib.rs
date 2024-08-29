@@ -33,8 +33,6 @@ struct Receipt {
 }
 
 fn check_certificate(cert: &str, service_cert_pem: &str) -> Res<bool> {
-    println!("  {}\n{}", "Checking KMS certificate...".red(), cert);
-
     // Load the endorser certificate from PEM
     let service_cert = X509::from_pem(service_cert_pem.as_bytes())?;
 
@@ -47,7 +45,7 @@ fn check_certificate(cert: &str, service_cert_pem: &str) -> Res<bool> {
     // Verify the endorsed certificate using the endorser's public key
     let result = endorsed_cert.verify(&public_key)?;
 
-    println!("  {}", "KMS certificate verified.".green());
+    println!("{}", "Certificate from key management service is trusted".green());
 
     Ok(result)
 }
@@ -95,7 +93,7 @@ fn compute_root(proof: Vec<ProofElement>, leaf: Vec<u8>) -> Res<Vec<u8>> {
 }
 
 fn check_signature(signing_cert: &str, signature: &str, root: &[u8]) -> Res<bool> {
-    println!("  {}", "Checking receipt signature...".red());
+    //println!("  {}", "Checking receipt signature...".red());
 
     // Load the certificate from PEM format
     let certificate = X509::from_pem(signing_cert.as_bytes())?;
