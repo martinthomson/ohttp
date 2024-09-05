@@ -1,7 +1,10 @@
 KMS ?= https://acceu-aml-504.confidential-ledger.azure.com
+MAA ?= https://maanosecureboottestyfu.eus.attest.azure.net
 TARGET ?= http://127.0.0.1:3000
-TARGET_PATH ?= '/v1/audio/transcriptions'
+# TARGET_PATH ?= '/v1/audio/transcriptions'
+TARGET_PATH ?= '/whisper'
 INPUT ?= ./examples/audio.mp3
+
 
 ca:
 	./ohttp-server/ca.sh
@@ -22,7 +25,10 @@ build: build-server build-client build-streaming build-whisper
 
 run-server: ca
 	cargo run --bin ohttp-server -- --certificate ./ohttp-server/server.crt \
-		--key ./ohttp-server/server.key --target ${TARGET}
+		--key ./ohttp-server/server.key --target ${TARGET} --maa ${MAA}
+
+run-server-container: 
+	docker run --privileged -e TARGET=${TARGET}  --net=host --mount type=bind,source=/sys/kernel/security,target=/sys/kernel/security  --device /dev/tpmrm0  ohttp-server
 
 run-whisper:
 	docker run --network=host whisper-api 
