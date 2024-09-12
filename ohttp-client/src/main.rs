@@ -7,7 +7,6 @@ use std::{
 use std::io::Cursor;
 use structopt::StructOpt;
 use reqwest::Client;
-use colored::*;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -74,6 +73,9 @@ struct Args {
     /// Enable override for the trust store.
     #[structopt(long)]
     trust: Option<PathBuf>,
+
+    #[structopt(long, short = "a")]
+    api_key: Option<String>
 }
 
 impl Args {
@@ -98,6 +100,8 @@ fn create_multipart_request(target_path: &str, file: &PathBuf) -> Res<Vec<u8>> {
 
     // Create multipart body
     let mut body = Vec::new();
+
+    // Add the file
     write!(
         &mut body,
         "--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.mp3\"\r\nContent-Type: {}\r\n\r\n",
@@ -107,6 +111,30 @@ fn create_multipart_request(target_path: &str, file: &PathBuf) -> Res<Vec<u8>> {
     body.extend_from_slice(&file_contents);
     write!(&mut body, "\r\n--{}--\r\n", boundary)?;
 
+    // Add the response format
+    write!(
+        &mut body,
+        "\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\n",
+    )?;
+    write!(&mut body, "verbose_json")?;
+    write!(&mut body, "\r\n--{}--\r\n", boundary)?;
+
+    // Add the model
+    write!(
+        &mut body,
+        "\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n",
+    )?;
+    write!(&mut body, "whisper-3")?;
+    write!(&mut body, "\r\n--{}--\r\n", boundary)?;
+
+    // Add language
+    write!(
+        &mut body,
+        "\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n",
+    )?;
+    write!(&mut body, "en")?;
+    write!(&mut body, "\r\n--{}--\r\n", boundary)?;
+    
     let mut request = Vec::new();
     write!(&mut request, "POST {} HTTP/1.1\r\n", target_path)?;
     write!(&mut request, "openai-internal-authtoken: \"testtoken\"\r\n")?;
@@ -178,9 +206,6 @@ async fn main() -> Res<()> {
         ohttp::ClientRequest::from_encoded_config_list(config)?
     };
 
-    //println!("Press any key to continue...");
-    //std::io::stdin().read(&mut [0u8]).unwrap();
-
     println!("\n================== STEP 2 ==================");
     let (enc_request, mut ohttp_response) = ohttp_request.encapsulate(&request_buf)?;
     println!("Sending encrypted OHTTP request to {}: {}", args.url, hex::encode(&enc_request[0..60]));
@@ -198,9 +223,15 @@ async fn main() -> Res<()> {
         None => reqwest::ClientBuilder::new().danger_accept_invalid_certs(true).build()?,
     };
 
-    let mut response = client
+    let mut builder = client
         .post(&args.url)
-        .header("content-type", "message/ohttp-chunked-req")
+        .header("content-type", "message/ohttp-chunked-req");
+
+    if let Some(key) = &args.api_key {
+        builder = builder.header("api-key", key)
+    }
+    
+    let mut response = builder
         .body(enc_request)
         .send()
         .await?

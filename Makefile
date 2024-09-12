@@ -25,7 +25,12 @@ build: build-server build-client build-streaming build-whisper
 
 run-server: ca
 	cargo run --bin ohttp-server -- --certificate ./ohttp-server/server.crt \
-		--key ./ohttp-server/server.key --target ${TARGET} --maa ${MAA}
+		--key ./ohttp-server/server.key --target ${TARGET} 
+
+run-server-attest: ca
+	cargo run --bin ohttp-server -- --certificate ./ohttp-server/server.crt \
+		--key ./ohttp-server/server.key --target ${TARGET} \
+		--attest --maa_url ${MAA} --kms_url ${KMS}
 
 run-server-container: 
 	docker run --privileged -e TARGET=${TARGET}  --net=host --mount type=bind,source=/sys/kernel/security,target=/sys/kernel/security  --device /dev/tpmrm0  ohttp-server
@@ -56,5 +61,5 @@ run-client-kms: ca service-cert verify-quote
 run-client-local: ca
 	cargo run --bin ohttp-client -- --trust ./ohttp-server/ca.crt \
   'https://localhost:9443/score' --target-path ${TARGET_PATH} -i ${INPUT} \
-  --config `curl -s -k https://localhost:9443/discover`
+  --config `curl -s -k https://localhost:9443/discover` --api-key test123
 
