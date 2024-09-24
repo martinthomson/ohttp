@@ -31,11 +31,12 @@ use serde_cbor::Value;
 use serde_json::from_str;
 
 use hpke::Deserializable;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 
 const CHUNK_SIZE: usize = 16000;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct ExportedKey {
     kid: u8,
     key: String,
@@ -45,7 +46,24 @@ struct ExportedKey {
 const DEFAULT_KMS_URL: &str = "https://acceu-aml-504.confidential-ledger.azure.com/key";
 const DEFAULT_MAA_URL: &str = "https://sharedeus2.eus2.attest.azure.net";
 
-#[derive(Debug, StructOpt)]
+/// Serializes any type implementing Serialize to JSON and prints it.
+///
+/// # Arguments
+///
+/// * `value` - A reference to any type that implements Serialize.
+///
+/// # Panics
+///
+/// This function will panic if serialization fails, which might happen if there's an error in the serialization process.
+fn println_structured<T: Serialize>(prefix: &str, value: &T) {
+    let json_output = serde_json::to_string(value)
+        .expect("Failed to serialize value to JSON");
+    
+    println!("{} : {}", prefix, json_output);
+}
+
+#[serde_as]
+#[derive(Debug, StructOpt, Serialize)]
 #[structopt(name = "ohttp-server", about = "Serve oblivious HTTP requests.")]
 struct Args {
     /// The address to bind to.
@@ -65,6 +83,7 @@ struct Args {
     key: PathBuf,
 
     /// Target server
+    #[serde_as(as = "DisplayFromStr")]
     #[structopt(long, short = "t", default_value = "http://127.0.0.1:8000")]
     target: Url,
 
@@ -154,11 +173,15 @@ async fn score(
                     }
                     let Some(mut chunk) = chunk else { return None };
 
-                    println!(
-                        "Processing chunk {} {}",
-                        first,
-                        std::str::from_utf8(&chunk).unwrap()
-                    );
+                    #[derive(Serialize)]
+                    struct ChunkInfo<'a> {
+                        first: bool,
+                        chunk: &'a str,
+                    }
+                    println_structured("Processing chunk", &ChunkInfo { 
+                        first: first, 
+                        chunk: std::str::from_utf8(&chunk).unwrap() 
+                    });
 
                     while !chunk.is_empty() {
                         // Determine the size of the next chunk part
@@ -212,7 +235,7 @@ async fn score(
                 .body(Body::wrap_stream(stream)))
         }
         Err(e) => {
-            println!("400 {}", e.to_string());
+            println_structured("400: ", &e.to_string());
             if let Ok(oe) = e.downcast::<::ohttp::Error>() {
                 Ok(warp::http::Response::builder()
                     .status(422)
@@ -247,7 +270,7 @@ async fn import_config(kms: &str, maa: &str) -> Res<KeyConfig> {
         panic!("Failed to get MAA token. You must be root to access TPM.")
     };
     let token = String::from_utf8(tok).unwrap();
-    println!("Fetched MAA token: {}", token);
+    println_structured("Fetched MAA token:", &token);
 
     let client = Client::builder()
         .danger_accept_invalid_certs(true)
@@ -271,9 +294,15 @@ async fn import_config(kms: &str, maa: &str) -> Res<KeyConfig> {
         if response.status() == 202 {
             if retries < max_retries {
                 retries += 1;
-                println!(
-                    "Received 202 status code, retrying... (attempt {}/{})",
-                    retries, max_retries
+
+                #[derive(Serialize)]
+                struct ErrorInfo {
+                    max_retries: i32,
+                    retries: i32,
+                }
+                println_structured(
+                    "Received 202 status code, retrying...", 
+                    &ErrorInfo { retries: retries, max_retries: max_retries }
                 );
                 sleep(Duration::from_secs(1)).await;
             } else {
@@ -284,9 +313,9 @@ async fn import_config(kms: &str, maa: &str) -> Res<KeyConfig> {
             let skr: ExportedKey =
                 from_str(&skr_body).expect("Failed to deserialize SKR response. Check KMS version");
 
-            println!(
-                "SKR successful, KID={}, Receipt={}, Key={}",
-                skr.kid, skr.receipt, skr.key
+            println_structured(
+                "Received 202 status code, retrying...", 
+                &skr
             );
             key = skr.key;
             break;
@@ -365,6 +394,7 @@ async fn import_config(kms: &str, maa: &str) -> Res<KeyConfig> {
 #[tokio::main]
 async fn main() -> Res<()> {
     let args = Args::from_args();
+    println_structured("Args", &args);
     ::ohttp::init();
     env_logger::try_init().unwrap();
 
@@ -385,7 +415,7 @@ async fn main() -> Res<()> {
 
     let ohttp = OhttpServer::new(config)?;
     let config = hex::encode(KeyConfig::encode_list(&[ohttp.config()])?);
-    println!("Config: {}", config);
+    println_structured("Config", &config);
 
     let mode = args.mode();
     let target = args.target;
