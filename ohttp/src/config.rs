@@ -78,6 +78,21 @@ impl KeyConfig {
         })
     }
 
+    /// Construct a configuration from an existing private key
+    /// # Panics
+    /// If the configurations don't include a supported configuration.
+    pub fn import_p384(key_id: u8, kem: Kem, sk: <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::PrivateKey, pk: <hpke::kem::DhP384HkdfSha384 as hpke::Kem>::PublicKey, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
+        Self::strip_unsupported(&mut symmetric, kem);
+        assert!(!symmetric.is_empty());
+        Ok(Self {
+            key_id,
+            kem,
+            symmetric,
+            sk: Some(crate::rh::hpke::PrivateKey::P384(sk)),
+            pk: crate::rh::hpke::PublicKey::P384(pk),
+        })
+    }
+
     /// Derive a configuration for the server side from input keying material,
     /// using the `DeriveKeyPair` functionality of the HPKE KEM defined here:
     /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4>
