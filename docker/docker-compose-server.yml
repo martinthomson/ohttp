@@ -1,0 +1,9 @@
+services:
+  server:
+    image: ohttp-server
+    ports:
+      - "9443:9443"
+    network_mode: "host"
+    environment:
+      - TARGET=http://localhost:3000
+      - INSTANCE_SPECIFIC_KEY=1

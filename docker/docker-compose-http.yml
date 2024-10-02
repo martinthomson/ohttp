@@ -1,0 +1,16 @@
+services:
+  ohttp:
+    image: ohttp-server
+    network_mode: "host"
+    ports:
+      - "9443:9443"
+    environment:
+      - TARGET=http://localhost:5678
+      - INSTANCE_SPECIFIC_KEY=1
+  web_service:
+    image: otomato/http-echo
+    command:
+      - '-text="Welcome to WASM land"'
+    network_mode: "host"
+    ports:
+      - "5678:5678"

@@ -10,9 +10,7 @@
     }
   },
   "features": {
-    "ghcr.io/devcontainers/features/docker-from-docker:1": {
-      "version": "20.10.8"
-    }
+    "ghcr.io/devcontainers/features/docker-from-docker:1": {}
   },
   "runArgs": [
     "--network=host"

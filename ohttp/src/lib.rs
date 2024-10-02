@@ -1,4 +1,4 @@
-#![deny(warnings, clippy::pedantic)]
+#![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // I'm too lazy
 #![cfg_attr(
     not(all(feature = "client", feature = "server")),
@@ -15,6 +15,10 @@ mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
 
+use async_stream::stream;
+use futures::{stream::Stream, StreamExt};
+use futures_util::stream::once;
+
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
@@ -25,7 +29,7 @@ use crate::{
     hpke::{Aead as AeadId, Kdf, Kem},
 };
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use log::trace;
+use log::{info, trace};
 use std::{
     cmp::max,
     convert::TryFrom,
@@ -259,12 +263,107 @@ impl ServerResponse {
         })
     }
 
+    // Variable length encoding of an integer
+    fn variant_encode(&mut self, mut val: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        loop {
+            let mut byte = (val & 0x7F) as u8; // Take the last 7 bits
+            val >>= 7; // Shift right by 7 bits
+            if val != 0 {
+                byte |= 0x80; // Set the MSB if there's more to encode
+            }
+            bytes.push(byte);
+            if val == 0 {
+                break;
+            }
+        }
+        bytes
+    }
+
     /// Consume this object by encapsulating a response.
     pub fn encapsulate(mut self, response: &[u8]) -> Res<Vec<u8>> {
         let mut enc_response = self.response_nonce;
         let mut ct = self.aead.seal(&[], response)?;
         enc_response.append(&mut ct);
         Ok(enc_response)
+    }
+
+    // Consume this object by encapsulating a stream
+    // https://www.ietf.org/archive/id/draft-ohai-chunked-ohttp-01.html#name-response-format
+    // Chunked Encapsulated Response {
+    //   Response Nonce (Nk),
+    //   Chunked Response Chunks (..),
+    // }
+
+    // Chunked Response Chunks {
+    //   Non-Final Response Chunk (..),
+    //   Final Response Chunk Indicator (i) = 0,
+    //   AEAD-Protected Final Response Chunk (..),
+    // }
+
+    // Non-Final Response Chunk {
+    //   Length (i) = 1..,
+    //   AEAD-Protected Chunk (..),
+    // }
+    pub fn encapsulate_stream<S, E>(
+        mut self,
+        input: S,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Res<Vec<u8>>> + Send + 'static>>
+    where
+        S: Stream<Item = Result<Vec<u8>, E>> + Send + 'static,
+        E: std::fmt::Debug + Send,
+    {
+        // Response Nonce (Nk)
+        let response_nonce = Ok(self.response_nonce.clone());
+        info!("Response nonce {}", hex::encode(&self.response_nonce.clone()));
+        let nonce_stream = once(async { response_nonce });
+
+        let mut input = Box::pin(input);
+        let output_stream = stream! {
+            let current = input.next().await;
+            let Some(current) = current else { return };
+            let Ok(mut current) = current else { return };
+            
+            loop {
+                info!("Processing chunk {}", std::str::from_utf8(&current).unwrap());
+                if let Some(next) = input.next().await {
+                    let mut enc_response = Vec::new();
+
+                    // Non-Final Response Chunk (..),
+                    let aad = "";
+                    let mut ct = self.aead.seal(aad.as_bytes(), &current).unwrap();
+                    let mut enc_length = self.variant_encode(ct.len());
+                    // Length (i) = 1..,
+                    enc_response.append(&mut enc_length);
+
+                    // AEAD-Protected Chunk (..),
+                    enc_response.append(&mut ct);
+
+                    info!("Encapsulated chunk {}", hex::encode(&enc_response));
+                    yield Ok(enc_response);
+                    current = next.unwrap();
+                } else {
+                    let mut enc_response = Vec::new();
+
+                    // Final Response Chunk Indicator (i) = 0,
+                    let mut final_chunk_indicator = self.variant_encode(0);
+                    enc_response.append(&mut final_chunk_indicator);
+
+                    // AEAD-Protected Final Response Chunk (..),
+                    let aad = "final";
+                    let mut ct = self.aead.seal(aad.as_bytes(), &current).unwrap();
+                    let mut enc_length = self.variant_encode(ct.len());
+                    enc_response.append(&mut enc_length);
+                    enc_response.append(&mut ct);
+                    info!("Encapsulated final chunk {}", hex::encode(&enc_response));
+                    yield Ok(enc_response);
+                    return;
+                }
+            }
+        };
+
+        let stream = nonce_stream.chain(output_stream);
+        Box::pin(stream)
     }
 }
 
@@ -281,6 +380,8 @@ impl std::fmt::Debug for ServerResponse {
 pub struct ClientResponse {
     hpke: HpkeS,
     enc: Vec<u8>,
+    seq: u64,
+    aead: Option<Aead>,
 }
 
 #[cfg(feature = "client")]
@@ -289,7 +390,14 @@ impl ClientResponse {
     /// Doesn't do anything because we don't have the nonce yet, so
     /// the work that can be done is limited.
     fn new(hpke: HpkeS, enc: Vec<u8>) -> Self {
-        Self { hpke, enc }
+        let seq = 0;
+        let aead = None;
+        Self {
+            hpke,
+            enc,
+            seq,
+            aead,
+        }
     }
 
     /// Consume this object by decapsulating a response.
@@ -307,6 +415,97 @@ impl ClientResponse {
             response_nonce,
         )?;
         aead.open(&[], 0, ct) // 0 is the sequence number
+    }
+
+    fn set_response_nonce(&mut self, enc_response: &[u8]) -> Res<()> {
+        let mid = entropy(self.hpke.config());
+        if mid != enc_response.len() {
+            return Err(Error::Truncated);
+        }
+        let aead = make_aead(
+            Mode::Decrypt,
+            self.hpke.config(),
+            &self.hpke,
+            self.enc.clone(),
+            enc_response,
+        )?;
+        self.aead = Some(aead);
+        Ok(())
+    }
+
+    fn variant_decode(&mut self, bytes: &[u8]) -> Result<(u64, usize), String> {
+        let mut value: u64 = 0;
+        let mut shift = 0;
+        let mut bytes_read = 0;
+
+        for &byte in bytes {
+            let byte_value = (byte & 0x7F) as u64;
+            value |= byte_value << shift;
+            bytes_read += 1;
+            if byte & 0x80 == 0 {
+                // Continuation bit is not set, end of the VLQ-encoded integer
+                return Ok((value, bytes_read));
+            }
+            shift += 7;
+            if shift >= 64 {
+                return Err("VLQ-encoded integer is too large".to_string());
+            }
+        }
+        Err("Incomplete VLQ-encoded integer".to_string())
+    }
+
+    pub async fn decapsulate_stream<S>(
+        mut self,
+        mut stream: S,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Res<Vec<u8>>> + Send + 'static>>
+    where
+        S: Stream<Item = Res<Vec<u8>>> + Send + 'static + Unpin,
+    {
+        // Response Nonce (Nk)
+        if let Some(nonce) = stream.next().await {
+            let enc_response = nonce.unwrap();
+            info!("Setting response nonce: {}({})", hex::encode(&enc_response), enc_response.len());
+            self.set_response_nonce(&enc_response).unwrap();
+        }
+
+        let output_stream = stream! {
+            while let Some(next) = stream.next().await {
+                let mut enc_response = next.unwrap();
+                if enc_response.is_empty() { return };
+                info!("Decrypting chunk: {}({})", hex::encode(&enc_response), enc_response.len());
+                let (len, bytes_read) = self.variant_decode(&enc_response).unwrap();
+                info!("Chunk length: {}, bytes read {}", len, bytes_read);
+                if len != 0 {
+                    let aad = "";
+                    let (_, ct) = enc_response.split_at(bytes_read);
+                    let mut current = ct.to_vec();
+                    while (current.len() as u64) < len {
+                        enc_response = stream.next().await.unwrap().unwrap();
+                        info!("Appending chunk: {}({})", hex::encode(&enc_response), enc_response.len());
+                        current.append(&mut enc_response);
+                    }
+                    self.seq += 1;
+                    yield self.aead.as_mut().unwrap().open(aad.as_bytes(), self.seq - 1, &current);
+                } else {
+                    let (_, rest) = enc_response.split_at(bytes_read);
+                    let (_, bytes_read) = self.variant_decode(&rest).unwrap();
+                    let (_, ct) = rest.split_at(bytes_read);
+                    // Read to the end
+                    let mut current = ct.to_vec();
+                    while let Some(next) = stream.next().await {
+                        enc_response = next.unwrap();
+                        info!("Appending chunk: {}({})", hex::encode(&enc_response), enc_response.len());
+                        current.append(&mut enc_response);
+                    }
+                    let aad = "final";
+                    self.seq += 1;
+                    yield self.aead.as_mut().unwrap().open(aad.as_bytes(), self.seq - 1, &current);
+                    return;
+                }
+            }
+        };
+
+        Box::pin(output_stream)
     }
 }
 

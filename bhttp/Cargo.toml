@@ -16,6 +16,7 @@ read-bhttp = []
 write-bhttp = []
 read-http = ["url"]
 write-http = []
+stream = []
 
 [dependencies]
 thiserror = "1"

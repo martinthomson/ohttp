@@ -10,12 +10,21 @@ nss = ["ohttp/nss"]
 rust-hpke = ["ohttp/rust-hpke"]
 
 [dependencies]
+clap = { version = "4.5.18", features = ["derive"] }
+colored = "2.1.0"
 env_logger = {version = "0.10", default-features = false}
 hex = "0.4"
+log = "0.4.22"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 rustls = { version = "0.21.6", features = ["dangerous_configuration"] }
-structopt = "0.3"
 tokio = { version = "1", features = ["full"] }
+futures-util = "0.3.30"
+futures = "0.3.30"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dependencies.verifier]
+path= "../verifier"
 
 [dependencies.bhttp]
 path= "../bhttp"
