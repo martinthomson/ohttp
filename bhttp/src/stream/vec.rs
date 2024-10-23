@@ -216,7 +216,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(target_pointer_width = "32")]
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "16"))]
     #[should_panic(expected = "cannot set a limit larger than usize::MAX")]
     fn too_large_cap() {
         const LEN: u64 = 20;
