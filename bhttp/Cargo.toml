@@ -9,15 +9,13 @@ description = "Binary HTTP messages (RFC 9292)"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
-default = ["bhttp"]
-bhttp = ["read-bhttp", "write-bhttp"]
-http = ["read-http", "write-http"]
-read-bhttp = []
-write-bhttp = []
-read-http = ["url"]
-write-http = []
+default = ["stream"]
+http = ["url"]
+stream = ["futures", "pin-project"]
 
 [dependencies]
+futures = {version = "0.3", optional = true}
+pin-project = {version = "1.1", optional = true}
 thiserror = "1"
 url = {version = "2", optional = true}
 

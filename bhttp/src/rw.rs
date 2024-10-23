@@ -1,79 +1,66 @@
-#[cfg(feature = "read-bhttp")]
-use std::borrow::BorrowMut;
-use std::{convert::TryFrom, io};
+use std::{borrow::BorrowMut, convert::TryFrom, io};
 
-use crate::err::Res;
-#[cfg(feature = "read-bhttp")]
-use crate::{err::Error, ReadSeek};
+use crate::{
+    err::{Error, Res},
+    ReadSeek,
+};
 
-#[cfg(feature = "write-bhttp")]
 #[allow(clippy::cast_possible_truncation)]
-fn write_uint(n: u8, v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
-    let v = v.into();
-    assert!(n > 0 && usize::from(n) < std::mem::size_of::<u64>());
-    for i in 0..n {
-        w.write_all(&[((v >> (8 * (n - i - 1))) & 0xff) as u8])?;
-    }
+pub(crate) fn write_uint<const N: usize>(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
+    let v = v.into().to_be_bytes();
+    assert!((1..=std::mem::size_of::<u64>()).contains(&N));
+    w.write_all(&v[8 - N..])?;
     Ok(())
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into();
     match () {
-        () if v < (1 << 6) => write_uint(1, v, w),
-        () if v < (1 << 14) => write_uint(2, v | (1 << 14), w),
-        () if v < (1 << 30) => write_uint(4, v | (2 << 30), w),
-        () if v < (1 << 62) => write_uint(8, v | (3 << 62), w),
+        () if v < (1 << 6) => write_uint::<1>(v, w),
+        () if v < (1 << 14) => write_uint::<2>(v | (1 << 14), w),
+        () if v < (1 << 30) => write_uint::<4>(v | (2 << 30), w),
+        () if v < (1 << 62) => write_uint::<8>(v | (3 << 62), w),
         () => panic!("Varint value too large"),
     }
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_len(len: usize, w: &mut impl io::Write) -> Res<()> {
     write_varint(u64::try_from(len).unwrap(), w)
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_vec(v: &[u8], w: &mut impl io::Write) -> Res<()> {
     write_len(v.len(), w)?;
     w.write_all(v)?;
     Ok(())
 }
 
-#[cfg(feature = "read-bhttp")]
-fn read_uint<T, R>(n: usize, r: &mut T) -> Res<Option<u64>>
+fn read_uint<T, R, const N: usize>(r: &mut T) -> Res<Option<u64>>
 where
     T: BorrowMut<R> + ?Sized,
     R: ReadSeek + ?Sized,
 {
-    let mut buf = [0; 7];
-    let count = r.borrow_mut().read(&mut buf[..n])?;
+    let mut buf = [0; 8];
+    let count = r.borrow_mut().read(&mut buf[(8 - N)..])?;
     if count == 0 {
         Ok(None)
-    } else if count < n {
+    } else if count < N {
         Err(Error::Truncated)
     } else {
-        let mut v = 0;
-        for i in &buf[..n] {
-            v = (v << 8) | u64::from(*i);
-        }
-        Ok(Some(v))
+        Ok(Some(u64::from_be_bytes(buf)))
     }
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_varint<T, R>(r: &mut T) -> Res<Option<u64>>
 where
     T: BorrowMut<R> + ?Sized,
     R: ReadSeek + ?Sized,
 {
-    if let Some(b1) = read_uint(1, r)? {
+    if let Some(b1) = read_uint::<_, _, 1>(r)? {
         Ok(Some(match b1 >> 6 {
             0 => b1 & 0x3f,
-            1 => ((b1 & 0x3f) << 8) | read_uint(1, r)?.ok_or(Error::Truncated)?,
-            2 => ((b1 & 0x3f) << 24) | read_uint(3, r)?.ok_or(Error::Truncated)?,
-            3 => ((b1 & 0x3f) << 56) | read_uint(7, r)?.ok_or(Error::Truncated)?,
+            1 => ((b1 & 0x3f) << 8) | read_uint::<_, _, 1>(r)?.ok_or(Error::Truncated)?,
+            2 => ((b1 & 0x3f) << 24) | read_uint::<_, _, 3>(r)?.ok_or(Error::Truncated)?,
+            3 => ((b1 & 0x3f) << 56) | read_uint::<_, _, 7>(r)?.ok_or(Error::Truncated)?,
             _ => unreachable!(),
         }))
     } else {
@@ -81,7 +68,6 @@ where
     }
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_vec<T, R>(r: &mut T) -> Res<Option<Vec<u8>>>
 where
     T: BorrowMut<R> + ?Sized,
