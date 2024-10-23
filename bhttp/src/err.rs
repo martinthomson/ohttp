@@ -19,6 +19,9 @@ pub enum Error {
     InvalidStatus,
     #[error("IO error {0}")]
     Io(#[from] std::io::Error),
+    #[cfg(feature = "stream")]
+    #[error("the size of a vector exceeded the limit that was set")]
+    LimitExceeded,
     #[error("a field or line was missing a necessary character 0x{0:x}")]
     Missing(u8),
     #[error("a URL was missing a key component")]
