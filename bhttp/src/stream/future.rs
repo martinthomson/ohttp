@@ -1,9 +1,12 @@
 use std::{
     future::Future,
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
-use futures::FutureExt;
+use futures::{TryStream, TryStreamExt};
+
+use crate::Error;
 
 fn noop_context() -> Context<'static> {
     use std::{
@@ -35,28 +38,51 @@ fn noop_context() -> Context<'static> {
     Context::from_waker(noop_waker_ref())
 }
 
-fn assert_unpin<F: Future + Unpin>(v: F) -> F {
-    v
-}
-
 /// Drives the given future (`f`) until it resolves.
 /// Executes the indicated function (`p`) each time the
 /// poll returned `Poll::Pending`.
-pub fn sync_resolve_with<F: Future + Unpin, P: Fn(&mut F)>(f: F, p: P) -> F::Output {
-    let mut cx = noop_context();
-    let mut fut = assert_unpin(f);
-    let mut v = fut.poll_unpin(&mut cx);
-    while v.is_pending() {
-        p(&mut fut);
-        v = fut.poll_unpin(&mut cx);
+pub trait SyncResolve {
+    type Output;
+
+    fn sync_resolve(&mut self) -> Self::Output {
+        self.sync_resolve_with(|_| {})
     }
-    if let Poll::Ready(v) = v {
-        v
-    } else {
-        unreachable!();
+
+    fn sync_resolve_with<P: Fn(Pin<&mut Self>)>(&mut self, p: P) -> Self::Output;
+}
+
+impl<F: Future + Unpin> SyncResolve for F {
+    type Output = F::Output;
+
+    fn sync_resolve_with<P: Fn(Pin<&mut Self>)>(&mut self, p: P) -> Self::Output {
+        let mut cx = noop_context();
+        let mut fut = Pin::new(self);
+        let mut v = fut.as_mut().poll(&mut cx);
+        while v.is_pending() {
+            p(fut.as_mut());
+            v = fut.as_mut().poll(&mut cx);
+        }
+        if let Poll::Ready(v) = v {
+            v
+        } else {
+            unreachable!();
+        }
     }
 }
 
-pub fn sync_resolve<F: Future + Unpin>(f: F) -> F::Output {
-    sync_resolve_with(f, |_| {})
+pub trait SyncCollect {
+    type Item;
+
+    fn sync_collect(self) -> Result<Vec<Self::Item>, Error>;
+}
+
+impl<S> SyncCollect for S
+where
+    S: TryStream<Error = Error>,
+{
+    type Item = S::Ok;
+
+    fn sync_collect(self) -> Result<Vec<Self::Item>, Error> {
+        pin!(self.try_collect::<Vec<_>>()).sync_resolve()
+    }
 }

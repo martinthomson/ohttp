@@ -25,7 +25,7 @@ const COOKIE: &[u8] = b"cookie";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StatusCode(u16);
 
 impl StatusCode {
@@ -76,6 +76,17 @@ impl<T> ReadSeek for io::BufReader<T> where T: io::Read + io::Seek {}
 pub enum Mode {
     KnownLength,
     IndeterminateLength,
+}
+
+impl TryFrom<u64> for Mode {
+    type Error = Error;
+    fn try_from(t: u64) -> Result<Self, Self::Error> {
+        match t {
+            0 | 1 => Ok(Self::KnownLength),
+            2 | 3 => Ok(Self::IndeterminateLength),
+            _ => Err(Error::InvalidMode),
+        }
+    }
 }
 
 pub struct Field {
@@ -558,10 +569,49 @@ impl InformationalResponse {
     }
 }
 
+pub struct Header {
+    control: ControlData,
+    fields: FieldSection,
+}
+
+impl Header {
+    #[must_use]
+    pub fn control(&self) -> &ControlData {
+        &self.control
+    }
+}
+
+impl From<ControlData> for Header {
+    fn from(control: ControlData) -> Self {
+        Self {
+            control,
+            fields: FieldSection::default(),
+        }
+    }
+}
+
+impl From<(ControlData, FieldSection)> for Header {
+    fn from((control, fields): (ControlData, FieldSection)) -> Self {
+        Self { control, fields }
+    }
+}
+
+impl std::ops::Deref for Header {
+    type Target = FieldSection;
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl std::ops::DerefMut for Header {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
+
 pub struct Message {
     informational: Vec<InformationalResponse>,
-    control: ControlData,
-    header: FieldSection,
+    header: Header,
     content: Vec<u8>,
     trailer: FieldSection,
 }
@@ -571,13 +621,12 @@ impl Message {
     pub fn request(method: Vec<u8>, scheme: Vec<u8>, authority: Vec<u8>, path: Vec<u8>) -> Self {
         Self {
             informational: Vec::new(),
-            control: ControlData::Request {
+            header: Header::from(ControlData::Request {
                 method,
                 scheme,
                 authority,
                 path,
-            },
-            header: FieldSection::default(),
+            }),
             content: Vec::new(),
             trailer: FieldSection::default(),
         }
@@ -587,8 +636,7 @@ impl Message {
     pub fn response(status: StatusCode) -> Self {
         Self {
             informational: Vec::new(),
-            control: ControlData::Response(status),
-            header: FieldSection::default(),
+            header: Header::from(ControlData::Response(status)),
             content: Vec::new(),
             trailer: FieldSection::default(),
         }
@@ -613,11 +661,11 @@ impl Message {
 
     #[must_use]
     pub fn control(&self) -> &ControlData {
-        &self.control
+        self.header.control()
     }
 
     #[must_use]
-    pub fn header(&self) -> &FieldSection {
+    pub fn header(&self) -> &Header {
         &self.header
     }
 
@@ -672,20 +720,20 @@ impl Message {
             control = ControlData::read_http(line)?;
         }
 
-        let mut header = FieldSection::read_http(r)?;
+        let mut hfields = FieldSection::read_http(r)?;
 
         let (content, trailer) =
             if matches!(control.status().map(StatusCode::code), Some(204 | 304)) {
                 // 204 and 304 have no body, no matter what Content-Length says.
                 // Unfortunately, we can't do the same for responses to HEAD.
                 (Vec::new(), FieldSection::default())
-            } else if header.is_chunked() {
+            } else if hfields.is_chunked() {
                 let content = Self::read_chunked(r)?;
                 let trailer = FieldSection::read_http(r)?;
                 (content, trailer)
             } else {
                 let mut content = Vec::new();
-                if let Some(cl) = header.get(CONTENT_LENGTH) {
+                if let Some(cl) = hfields.get(CONTENT_LENGTH) {
                     let cl_str = String::from_utf8(Vec::from(cl))?;
                     let cl_int = cl_str.parse::<usize>()?;
                     if cl_int > 0 {
@@ -700,11 +748,10 @@ impl Message {
                 (content, FieldSection::default())
             };
 
-        header.strip_connection_headers();
+        hfields.strip_connection_headers();
         Ok(Self {
             informational,
-            control,
-            header,
+            header: Header::from((control, hfields)),
             content,
             trailer,
         })
@@ -716,7 +763,7 @@ impl Message {
             ControlData::Response(info.status()).write_http(w)?;
             info.fields().write_http(w)?;
         }
-        self.control.write_http(w)?;
+        self.header.control.write_http(w)?;
         if !self.content.is_empty() {
             if self.trailer.is_empty() {
                 write!(w, "Content-Length: {}\r\n", self.content.len())?;
@@ -746,11 +793,7 @@ impl Message {
     {
         let t = read_varint(r)?.ok_or(Error::Truncated)?;
         let request = t == 0 || t == 2;
-        let mode = match t {
-            0 | 1 => Mode::KnownLength,
-            2 | 3 => Mode::IndeterminateLength,
-            _ => return Err(Error::InvalidMode),
-        };
+        let mode = Mode::try_from(t)?;
 
         let mut control = ControlData::read_bhttp(request, r)?;
         let mut informational = Vec::new();
@@ -759,7 +802,7 @@ impl Message {
             informational.push(InformationalResponse::new(status, fields));
             control = ControlData::read_bhttp(request, r)?;
         }
-        let header = FieldSection::read_bhttp(mode, r)?;
+        let hfields = FieldSection::read_bhttp(mode, r)?;
 
         let mut content = read_vec(r)?.unwrap_or_default();
         if mode == Mode::IndeterminateLength && !content.is_empty() {
@@ -776,19 +819,18 @@ impl Message {
 
         Ok(Self {
             informational,
-            control,
-            header,
+            header: Header::from((control, hfields)),
             content,
             trailer,
         })
     }
 
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
-        write_varint(self.control.code(mode), w)?;
+        write_varint(self.header.control.code(mode), w)?;
         for info in &self.informational {
             info.write_bhttp(mode, w)?;
         }
-        self.control.write_bhttp(w)?;
+        self.header.control.write_bhttp(w)?;
         self.header.write_bhttp(mode, w)?;
 
         write_vec(&self.content, w)?;

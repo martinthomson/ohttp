@@ -125,10 +125,7 @@ mod test {
 
     use crate::{
         rw::write_varint as sync_write_varint,
-        stream::{
-            context::{sync_resolve, sync_resolve_with},
-            vec::read_vec,
-        },
+        stream::{future::SyncResolve, vec::read_vec},
         Error,
     };
 
@@ -154,7 +151,7 @@ mod test {
             let buf = fill(len);
             let mut buf_ref = &buf[..];
             let mut fut = read_vec(&mut buf_ref);
-            if let Ok(Some(out)) = sync_resolve(&mut fut) {
+            if let Ok(Some(out)) = fut.sync_resolve() {
                 assert_eq!(len, out.len());
                 assert!(out.iter().all(|&v| v == FILL_VALUE));
 
@@ -170,7 +167,7 @@ mod test {
         let mut buf_ref = &buf[..];
         let mut fut = read_vec(&mut buf_ref);
         fut.limit(LEN - 1);
-        assert!(matches!(sync_resolve(&mut fut), Err(Error::LimitExceeded)));
+        assert!(matches!(fut.sync_resolve(), Err(Error::LimitExceeded)));
     }
 
     /// This class implements `AsyncRead`, but
@@ -209,9 +206,9 @@ mod test {
     #[should_panic(expected = "cannot set a limit once the size has been read")]
     fn late_cap() {
         let mut buf = IncompleteRead::new(&[2, 1]);
-        _ = sync_resolve_with(read_vec(&mut buf), |f| {
+        _ = read_vec(&mut buf).sync_resolve_with(|mut f| {
             println!("pending");
-            f.limit(100);
+            f.as_mut().limit(100);
         });
     }
 

@@ -17,6 +17,9 @@ pub enum Error {
     InvalidMode,
     #[error("the status code of a response needs to be in 100..=599")]
     InvalidStatus,
+    #[cfg(feature = "stream")]
+    #[error("a method was called when the message was in the wrong state")]
+    InvalidState,
     #[error("IO error {0}")]
     Io(#[from] std::io::Error),
     #[cfg(feature = "stream")]

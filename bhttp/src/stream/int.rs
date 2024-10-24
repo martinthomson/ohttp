@@ -144,7 +144,7 @@ mod test {
         err::Error,
         rw::{write_uint as sync_write_uint, write_varint as sync_write_varint},
         stream::{
-            context::sync_resolve,
+            future::SyncResolve,
             int::{read_uint, read_varint},
         },
     };
@@ -172,7 +172,7 @@ mod test {
                     sync_write_uint::<$n>(v, &mut buf).unwrap();
                     let mut buf_ref = &buf[..];
                     let mut fut = read_uint::<_, $n>(&mut buf_ref);
-                    assert_eq!(v, sync_resolve(&mut fut).unwrap());
+                    assert_eq!(v, fut.sync_resolve().unwrap());
                     let s = fut.stream();
                     assert!(s.is_empty());
                 }
@@ -196,7 +196,7 @@ mod test {
                     let mut buf = Vec::with_capacity($n);
                     sync_write_uint::<$n>(v, &mut buf).unwrap();
                     for i in 1..buf.len() {
-                        let err = sync_resolve(read_uint::<_, $n>(&mut &buf[..i])).unwrap_err();
+                        let err = read_uint::<_, $n>(&mut &buf[..i]).sync_resolve().unwrap_err();
                         assert!(matches!(err, Error::Truncated));
                     }
                 }
@@ -217,7 +217,7 @@ mod test {
             sync_write_varint(v, &mut buf).unwrap();
             let mut buf_ref = &buf[..];
             let mut fut = read_varint(&mut buf_ref);
-            assert_eq!(Some(v), sync_resolve(&mut fut).unwrap());
+            assert_eq!(Some(v), fut.sync_resolve().unwrap());
             let s = fut.stream();
             assert!(s.is_empty());
         }
@@ -225,7 +225,7 @@ mod test {
 
     #[test]
     fn read_varint_none() {
-        assert!(sync_resolve(read_varint(&mut &[][..])).unwrap().is_none());
+        assert!(read_varint(&mut &[][..]).sync_resolve().unwrap().is_none());
     }
 
     #[test]
@@ -236,7 +236,7 @@ mod test {
             for i in 1..buf.len() {
                 let err = {
                     let mut buf: &[u8] = &buf[..i];
-                    sync_resolve(read_varint(&mut buf))
+                    read_varint(&mut buf).sync_resolve()
                 }
                 .unwrap_err();
                 assert!(matches!(err, Error::Truncated));
@@ -253,7 +253,7 @@ mod test {
             buf.extend_from_slice(EXTRA);
             let mut buf_ref = &buf[..];
             let mut fut = read_varint(&mut buf_ref);
-            assert_eq!(Some(v), sync_resolve(&mut fut).unwrap());
+            assert_eq!(Some(v), fut.sync_resolve().unwrap());
             let s = fut.stream();
             assert_eq!(&s[..], EXTRA);
         }
