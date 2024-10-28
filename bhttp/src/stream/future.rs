@@ -104,3 +104,23 @@ impl<S: AsyncRead + Unpin> SyncRead for S {
         buf
     }
 }
+
+pub struct Dribble<S> {
+    src: S,
+}
+
+impl<S> Dribble<S> {
+    pub fn new(src: S) -> Self {
+        Self { src }
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Dribble<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        pin!(&mut self.src).poll_read(cx, &mut buf[..1])
+    }
+}

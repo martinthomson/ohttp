@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![allow(clippy::incompatible_msrv)] // This module uses features from rust 1.82
 
 use std::{
@@ -8,8 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{stream::unfold, AsyncRead, FutureExt, Stream, TryStreamExt};
-use int::ReadVarint;
+use futures::{stream::unfold, AsyncRead, Stream, TryStreamExt};
 
 use crate::{
     err::Res,
@@ -89,135 +89,95 @@ impl AsyncReadFieldSection for FieldSection {
     }
 }
 
-#[allow(clippy::mut_mut)] // TODO look into this more.
-enum BodyState<'a, 'b, S> {
+#[derive(Default)]
+enum BodyState {
+    // The starting state.
+    #[default]
+    Init,
     // When reading the length, use this.
-    // Invariant: This is always `Some`.
-    ReadLength(Option<ReadVarint<&'b mut &'a mut S>>),
+    ReadLength {
+        buf: [u8; 8],
+        read: usize,
+    },
     // When reading the data, track how much is left.
-    // Invariant: `src` is always `Some`.
     ReadData {
         remaining: usize,
-        src: Option<&'b mut &'a mut S>,
     },
 }
 
-pub struct Body<'a, 'b, S> {
-    mode: Mode,
-    state: &'b mut AsyncMessageState<'a, 'b, S>,
-}
-
-impl<'a, 'b, S> Body<'a, 'b, S> {
-    fn set_state(&mut self, s: BodyState<'a, 'b, S>) {
-        *self.state = AsyncMessageState::Body(s);
-    }
-
-    fn done(&mut self) {
-        *self.state = AsyncMessageState::Trailer;
+impl BodyState {
+    fn read_len() -> Self {
+        Self::ReadLength {
+            buf: [0; 8],
+            read: 0,
+        }
     }
 }
 
-impl<'a, 'b, S: AsyncRead + Unpin> AsyncRead for Body<'a, 'b, S> {
+pub struct Body<'b, S> {
+    msg: &'b mut AsyncMessage<S>,
+}
+
+impl<'b, S> Body<'b, S> {}
+
+impl<'b, S: AsyncRead + Unpin> AsyncRead for Body<'b, S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<IoResult<usize>> {
-        fn poll_error(e: Error) -> Poll<IoResult<usize>> {
-            Poll::Ready(Err(IoError::other(e)))
-        }
-
-        let mode = self.mode;
-        if let AsyncMessageState::Body(BodyState::ReadLength(r)) = &mut self.state {
-            match r.as_mut().unwrap().poll_unpin(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Ok(Some(0) | None)) => {
-                    self.done();
-                    return Poll::Ready(Ok(0));
-                }
-                Poll::Ready(Ok(Some(len))) => {
-                    match usize::try_from(len) {
-                        Ok(remaining) => {
-                            let src = r.take().map(ReadVarint::stream);
-                            self.set_state(BodyState::ReadData { remaining, src });
-                            // fall through to maybe read the body
-                        }
-                        Err(e) => return poll_error(Error::IntRange(e)),
-                    }
-                }
-                Poll::Ready(Err(e)) => return poll_error(e),
-            }
-        }
-
-        if let AsyncMessageState::Body(BodyState::ReadData { remaining, src }) = &mut self.state {
-            let amount = min(*remaining, buf.len());
-            let res = pin!(src.as_mut().unwrap()).poll_read(cx, &mut buf[..amount]);
-            match res {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Ok(0)) => poll_error(Error::Truncated),
-                Poll::Ready(Ok(len)) => {
-                    *remaining -= len;
-                    if *remaining == 0 {
-                        if mode == Mode::IndeterminateLength {
-                            let src = src.take().map(read_varint);
-                            self.set_state(BodyState::ReadLength(src));
-                        } else {
-                            self.done();
-                        }
-                    }
-                    Poll::Ready(Ok(len))
-                }
-                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            }
-        } else {
-            Poll::Pending
-        }
+        self.msg.read_body(cx, buf).map_err(IoError::other)
     }
 }
 
-enum AsyncMessageState<'a, 'b, S> {
+/// A helper function for the more complex body-reading code.
+fn poll_error(e: Error) -> Poll<IoResult<usize>> {
+    Poll::Ready(Err(IoError::other(e)))
+}
+
+enum AsyncMessageState {
+    Init,
     // Processing Informational responses (or before that).
-    Informational,
+    Informational(bool),
     // Having obtained the control data for the header, this is it.
     Header(ControlData),
     // Processing the Body.
-    Body(BodyState<'a, 'b, S>),
+    Body(BodyState),
     // Processing the trailer.
     Trailer,
+    // All done.
+    Done,
 }
 
-pub struct AsyncMessage<'a, 'b, S> {
+pub struct AsyncMessage<S> {
     // Whether this is a request and which mode.
-    framing: Option<(bool, Mode)>,
-    state: AsyncMessageState<'a, 'b, S>,
-    src: &'a mut S,
+    mode: Option<Mode>,
+    state: AsyncMessageState,
+    src: S,
 }
 
-unsafe impl<S: Send> Send for AsyncMessage<'_, '_, S> {}
+unsafe impl<S: Send> Send for AsyncMessage<S> {}
 
-impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
-    /// Get the mode.  This panics if the header hasn't been read yet.
-    fn mode(&self) -> Mode {
-        self.framing.unwrap().1
-    }
-
+impl<S: AsyncRead + Unpin> AsyncMessage<S> {
     async fn next_info(&mut self) -> Res<Option<InformationalResponse>> {
-        if !matches!(self.state, AsyncMessageState::Informational) {
-            return Ok(None);
-        }
-
-        let (request, mode) = if let Some((request, mode)) = self.framing {
-            (request, mode)
-        } else {
+        let request = if matches!(self.state, AsyncMessageState::Init) {
+            // Read control data ...
             let t = read_varint(&mut self.src).await?.ok_or(Error::Truncated)?;
             let request = t == 0 || t == 2;
-            let mode = Mode::try_from(t)?;
-            self.framing = Some((request, mode));
-            (request, mode)
+            self.mode = Some(Mode::try_from(t)?);
+            self.state = AsyncMessageState::Informational(request);
+            request
+        } else {
+            // ... or recover it.
+            let AsyncMessageState::Informational(request) = self.state else {
+                return Err(Error::InvalidState);
+            };
+            request
         };
 
         let control = ControlData::async_read(request, &mut self.src).await?;
         if let Some(status) = control.informational() {
+            let mode = self.mode.unwrap();
             let fields = FieldSection::async_read(mode, &mut self.src).await?;
             Ok(Some(InformationalResponse::new(status, fields)))
         } else {
@@ -227,7 +187,7 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
     }
 
     /// Produces a stream of informational responses from a fresh message.
-    /// Returns an empty stream if called at other times.
+    /// Returns an empty stream if passed a request (or if there are no informational responses).
     /// Error values on the stream indicate failures.
     ///
     /// There is no need to call this method to read a request, though
@@ -237,9 +197,7 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
     /// without affecting the message.  You can then either call this
     /// method again to get any additional informational responses or
     /// call `header()` to get the message header.
-    pub fn informational(
-        &mut self,
-    ) -> impl Stream<Item = Res<InformationalResponse>> + use<'_, 'a, 'b, S> {
+    pub fn informational(&mut self) -> impl Stream<Item = Res<InformationalResponse>> + use<'_, S> {
         unfold(self, |this| async move {
             this.next_info().await.transpose().map(|info| (info, this))
         })
@@ -247,26 +205,162 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
 
     /// This reads the header.  If you have not called `informational`
     /// and drained the resulting stream, this will do that for you.
-    pub async fn header(&'b mut self) -> Res<Header> {
-        if matches!(self.state, AsyncMessageState::Informational) {
+    /// # Panics
+    /// Never.
+    pub async fn header(&mut self) -> Res<Header> {
+        if matches!(
+            self.state,
+            AsyncMessageState::Init | AsyncMessageState::Informational(_)
+        ) {
             // Need to scrub for errors,
             // so that this can abort properly if there is one.
             // The `try_any` usage is there to ensure that the stream is fully drained.
             _ = self.informational().try_any(|_| async { false }).await?;
         }
+
         if matches!(self.state, AsyncMessageState::Header(_)) {
-            let mode = self.mode();
+            let mode = self.mode.unwrap();
             let hfields = FieldSection::async_read(mode, &mut self.src).await?;
 
-            let bs: BodyState<'a, 'b, S> = BodyState::ReadLength(Some(read_varint(&mut self.src)));
-            let AsyncMessageState::Header(control) =
-                mem::replace(&mut self.state, AsyncMessageState::Body(bs))
-            else {
+            let AsyncMessageState::Header(control) = mem::replace(
+                &mut self.state,
+                AsyncMessageState::Body(BodyState::default()),
+            ) else {
                 unreachable!();
             };
             Ok(Header::from((control, hfields)))
         } else {
             Err(Error::InvalidState)
+        }
+    }
+
+    fn body_state(&mut self, s: BodyState) {
+        self.state = AsyncMessageState::Body(s);
+    }
+
+    fn body_done(&mut self) {
+        self.state = AsyncMessageState::Trailer;
+    }
+
+    /// Read the length of a body chunk.
+    /// This updates the values of `read` and `buf` to track the portion of the length
+    /// that was successfully read.
+    /// Returns `Some` with the error code that should be used if the reading
+    /// resulted in a conclusive outcome.
+    fn read_body_len(
+        cx: &mut Context<'_>,
+        mut src: &mut S,
+        first: bool,
+        read: &mut usize,
+        buf: &mut [u8; 8],
+    ) -> Option<Poll<Result<usize, IoError>>> {
+        let mut src = pin!(src);
+        if *read == 0 {
+            let mut b = [0; 1];
+            match src.as_mut().poll_read(cx, &mut b[..]) {
+                Poll::Pending => return Some(Poll::Pending),
+                Poll::Ready(Ok(0)) => {
+                    return if first {
+                        // It's OK for the first length to be absent.
+                        // Just skip to the end.
+                        *read = 8;
+                        None
+                    } else {
+                        // ...it's not OK to drop length when continuing.
+                        Some(poll_error(Error::Truncated))
+                    };
+                }
+                Poll::Ready(Ok(1)) => match b[0] >> 6 {
+                    0 => {
+                        buf[7] = b[0] & 0x3f;
+                        *read = 8;
+                    }
+                    1 => {
+                        buf[6] = b[0] & 0x3f;
+                        *read = 7;
+                    }
+                    2 => {
+                        buf[4] = b[0] & 0x3f;
+                        *read = 5;
+                    }
+                    3 => {
+                        buf[0] = b[0] & 0x3f;
+                        *read = 1;
+                    }
+                    _ => unreachable!(),
+                },
+                Poll::Ready(Ok(_)) => unreachable!(),
+                Poll::Ready(Err(e)) => return Some(Poll::Ready(Err(e))),
+            }
+        }
+        if *read < 8 {
+            match src.as_mut().poll_read(cx, &mut buf[*read..]) {
+                Poll::Pending => return Some(Poll::Pending),
+                Poll::Ready(Ok(0)) => return Some(poll_error(Error::Truncated)),
+                Poll::Ready(Ok(len)) => {
+                    *read += len;
+                }
+                Poll::Ready(Err(e)) => return Some(Poll::Ready(Err(e))),
+            }
+        }
+        None
+    }
+
+    fn read_body(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<IoResult<usize>> {
+        // The length that precedes the first chunk can be absent.
+        // Only allow that for the first chunk (if indeterminate length).
+        let first = if let AsyncMessageState::Body(BodyState::Init) = &self.state {
+            self.body_state(BodyState::read_len());
+            true
+        } else {
+            false
+        };
+
+        // Read the length.  This uses `read_body_len` to track the state of this reading.
+        // This doesn't use `ReadVarint` or any convenience functions because we
+        // need to track the state and we don't want the borrow checker to flip out.
+        if let AsyncMessageState::Body(BodyState::ReadLength { buf, read }) = &mut self.state {
+            if let Some(res) = Self::read_body_len(cx, &mut self.src, first, read, buf) {
+                return res;
+            }
+            if *read == 8 {
+                match usize::try_from(u64::from_be_bytes(*buf)) {
+                    Ok(0) => {
+                        self.body_done();
+                        return Poll::Ready(Ok(0));
+                    }
+                    Ok(remaining) => {
+                        self.body_state(BodyState::ReadData { remaining });
+                    }
+                    Err(e) => return poll_error(Error::IntRange(e)),
+                }
+            }
+        }
+
+        match &mut self.state {
+            AsyncMessageState::Body(BodyState::ReadData { remaining }) => {
+                let amount = min(*remaining, buf.len());
+                let res = pin!(&mut self.src).poll_read(cx, &mut buf[..amount]);
+                match res {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(Ok(0)) => poll_error(Error::Truncated),
+                    Poll::Ready(Ok(len)) => {
+                        *remaining -= len;
+                        if *remaining == 0 {
+                            let mode = self.mode.unwrap();
+                            if mode == Mode::IndeterminateLength {
+                                self.body_state(BodyState::read_len());
+                            } else {
+                                self.body_done();
+                            }
+                        }
+                        Poll::Ready(Ok(len))
+                    }
+                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                }
+            }
+            AsyncMessageState::Trailer => Poll::Ready(Ok(0)),
+            _ => Poll::Pending,
         }
     }
 
@@ -276,15 +370,10 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
     /// # Errors
     /// This errors when the header has not been read.
     /// Any IO errors are generated by the returned `Body` instance.
-    pub fn body(&'b mut self) -> Res<Body<'a, 'b, S>> {
-        if matches!(self.state, AsyncMessageState::Body(_)) {
-            let mode = self.mode();
-            Ok(Body {
-                mode,
-                state: &mut self.state,
-            })
-        } else {
-            Err(Error::InvalidState)
+    pub fn body(&mut self) -> Res<Body<'_, S>> {
+        match self.state {
+            AsyncMessageState::Body(_) => Ok(Body { msg: self }),
+            _ => Err(Error::InvalidState),
         }
     }
 
@@ -292,9 +381,13 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
     /// This might be empty.
     /// # Errors
     /// This errors when the body has not been read.
+    /// # Panics
+    /// Never.
     pub async fn trailer(&mut self) -> Res<FieldSection> {
         if matches!(self.state, AsyncMessageState::Trailer) {
-            Ok(FieldSection::async_read(self.mode(), &mut self.src).await?)
+            let trailer = FieldSection::async_read(self.mode.unwrap(), &mut self.src).await?;
+            self.state = AsyncMessageState::Done;
+            Ok(trailer)
         } else {
             Err(Error::InvalidState)
         }
@@ -302,14 +395,14 @@ impl<'a, 'b, S: AsyncRead + Unpin> AsyncMessage<'a, 'b, S> {
 }
 
 pub trait AsyncReadMessage: Sized {
-    fn async_read<'b, S: AsyncRead + Unpin>(src: &mut S) -> AsyncMessage<'_, 'b, S>;
+    fn async_read<S: AsyncRead + Unpin>(src: S) -> AsyncMessage<S>;
 }
 
 impl AsyncReadMessage for Message {
-    fn async_read<'b, S: AsyncRead + Unpin>(src: &mut S) -> AsyncMessage<'_, 'b, S> {
+    fn async_read<S: AsyncRead + Unpin>(src: S) -> AsyncMessage<S> {
         AsyncMessage {
-            framing: None,
-            state: AsyncMessageState::Informational,
+            mode: None,
+            state: AsyncMessageState::Init,
             src,
         }
     }
@@ -323,7 +416,7 @@ mod test {
 
     use crate::{
         stream::{
-            future::{SyncCollect, SyncRead, SyncResolve},
+            future::{Dribble, SyncCollect, SyncRead, SyncResolve},
             AsyncReadMessage,
         },
         Error, Message,
@@ -361,8 +454,8 @@ mod test {
         let mut msg = Message::async_read(&mut buf_alias);
         let info = msg.informational().sync_collect().unwrap();
         assert_eq!(info.len(), 1);
-        let info = msg.informational().sync_collect().unwrap();
-        assert!(info.is_empty());
+        let err = msg.informational().sync_collect();
+        assert!(matches!(err, Err(Error::InvalidState)));
         let hdr = pin!(msg.header()).sync_resolve().unwrap();
         assert_eq!(hdr.control().status().unwrap().code(), 200);
         assert!(hdr.is_empty());
@@ -413,8 +506,9 @@ mod test {
         assert!(matches!(err, Error::Truncated));
     }
 
+    /// This test is crazy.  It reads a byte at a time and checks the state constantly.
     #[test]
-    fn sample_responses() {
+    fn sample_response() {
         const RESPONSE: &[u8] = &[
             0x03, 0x40, 0x66, 0x07, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x0a, 0x22, 0x73,
             0x6c, 0x65, 0x65, 0x70, 0x20, 0x31, 0x35, 0x22, 0x00, 0x40, 0x67, 0x04, 0x6c, 0x69,
@@ -446,7 +540,7 @@ mod test {
         ];
 
         let mut buf = RESPONSE;
-        let mut msg = Message::async_read(&mut buf);
+        let mut msg = Message::async_read(Dribble::new(&mut buf));
 
         {
             // Need to scope access to `info` or it will hold the reference to `msg`.
