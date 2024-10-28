@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
@@ -9,9 +9,9 @@ use futures::io::AsyncRead;
 use crate::{Error, Res};
 
 #[pin_project::pin_project]
-pub struct ReadUint<'a, S, const N: usize> {
+pub struct ReadUint<S, const N: usize> {
     ///  The source of data.
-    src: Pin<&'a mut S>,
+    src: S,
     /// A buffer that holds the bytes that have been read so far.
     v: [u8; 8],
     /// A counter of the number of bytes that are already in place.
@@ -19,21 +19,18 @@ pub struct ReadUint<'a, S, const N: usize> {
     read: usize,
 }
 
-impl<'a, S, const N: usize> ReadUint<'a, S, N> {
-    pub fn stream(self) -> Pin<&'a mut S> {
+impl<S, const N: usize> ReadUint<S, N> {
+    pub fn stream(self) -> S {
         self.src
     }
 }
 
-impl<'a, S, const N: usize> Future for ReadUint<'a, S, N>
-where
-    S: AsyncRead,
-{
+impl<S: AsyncRead + Unpin, const N: usize> Future for ReadUint<S, N> {
     type Output = Res<u64>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        match this.src.as_mut().poll_read(cx, &mut this.v[*this.read..]) {
+        match pin!(this.src).poll_read(cx, &mut this.v[*this.read..]) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(count)) => {
                 if count == 0 {
@@ -51,25 +48,26 @@ where
     }
 }
 
-pub fn read_uint<S: Unpin, const N: usize>(src: &mut S) -> ReadUint<'_, S, N> {
+#[cfg(test)]
+fn read_uint<S, const N: usize>(src: S) -> ReadUint<S, N> {
     ReadUint {
-        src: Pin::new(src),
+        src,
         v: [0; 8],
         read: 8 - N,
     }
 }
 
 #[pin_project::pin_project(project = ReadVarintProj)]
-pub enum ReadVarint<'a, S> {
+pub enum ReadVarint<S> {
     // Invariant: this Option always contains Some.
-    First(Option<Pin<&'a mut S>>),
-    Extra1(#[pin] ReadUint<'a, S, 8>),
-    Extra3(#[pin] ReadUint<'a, S, 8>),
-    Extra7(#[pin] ReadUint<'a, S, 8>),
+    First(Option<S>),
+    Extra1(#[pin] ReadUint<S, 8>),
+    Extra3(#[pin] ReadUint<S, 8>),
+    Extra7(#[pin] ReadUint<S, 8>),
 }
 
-impl<'a, S> ReadVarint<'a, S> {
-    pub fn stream(self) -> Pin<&'a mut S> {
+impl<S> ReadVarint<S> {
+    pub fn stream(self) -> S {
         match self {
             Self::Extra1(s) | Self::Extra3(s) | Self::Extra7(s) => s.stream(),
             Self::First(mut s) => s.take().unwrap(),
@@ -77,18 +75,15 @@ impl<'a, S> ReadVarint<'a, S> {
     }
 }
 
-impl<'a, S> Future for ReadVarint<'a, S>
-where
-    S: AsyncRead,
-{
+impl<S: AsyncRead + Unpin> Future for ReadVarint<S> {
     type Output = Res<Option<u64>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut();
         if let Self::First(ref mut src) = this.get_mut() {
             let mut buf = [0; 1];
-            let src_ref = src.as_mut().unwrap().as_mut();
-            if let Poll::Ready(res) = src_ref.poll_read(cx, &mut buf[..]) {
+            let src_ref = src.as_mut().unwrap();
+            if let Poll::Ready(res) = pin!(src_ref).poll_read(cx, &mut buf[..]) {
                 match res {
                     Ok(0) => return Poll::Ready(Ok(None)),
                     Ok(_) => (),
@@ -134,8 +129,8 @@ where
     }
 }
 
-pub fn read_varint<S: Unpin>(src: &mut S) -> ReadVarint<'_, S> {
-    ReadVarint::First(Some(Pin::new(src)))
+pub fn read_varint<S>(src: S) -> ReadVarint<S> {
+    ReadVarint::First(Some(src))
 }
 
 #[cfg(test)]

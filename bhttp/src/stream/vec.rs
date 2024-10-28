@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     mem,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
@@ -12,24 +12,26 @@ use crate::{Error, Res};
 
 #[pin_project::pin_project(project = ReadVecProj)]
 #[allow(clippy::module_name_repetitions)]
-pub enum ReadVec<'a, S> {
+pub enum ReadVec<S> {
     // Invariant: This Option is always Some.
     ReadLen {
-        src: Option<ReadVarint<'a, S>>,
+        src: Option<ReadVarint<S>>,
         cap: u64,
     },
     ReadBody {
-        src: Pin<&'a mut S>,
+        src: S,
         buf: Vec<u8>,
         remaining: usize,
     },
 }
 
-impl<'a, S> ReadVec<'a, S> {
+impl<S> ReadVec<S> {
+    #![allow(dead_code)] // TODO these really need to be used.
+
     /// # Panics
     /// If `limit` is more than `usize::MAX` or
     /// if this is called after the length is read.
-    fn limit(&mut self, limit: u64) {
+    pub fn limit(&mut self, limit: u64) {
         usize::try_from(limit).expect("cannot set a limit larger than usize::MAX");
         if let Self::ReadLen { ref mut cap, .. } = self {
             *cap = limit;
@@ -38,7 +40,7 @@ impl<'a, S> ReadVec<'a, S> {
         }
     }
 
-    fn stream(self) -> Pin<&'a mut S> {
+    pub fn stream(self) -> S {
         match self {
             Self::ReadLen { mut src, .. } => src.take().unwrap().stream(),
             Self::ReadBody { src, .. } => src,
@@ -46,10 +48,7 @@ impl<'a, S> ReadVec<'a, S> {
     }
 }
 
-impl<'a, S> Future for ReadVec<'a, S>
-where
-    S: AsyncRead,
-{
+impl<S: AsyncRead + Unpin> Future for ReadVec<S> {
     type Output = Res<Option<Vec<u8>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -86,7 +85,7 @@ where
         };
 
         let offset = buf.len() - *remaining;
-        match src.as_mut().poll_read(cx, &mut buf[offset..]) {
+        match pin!(src).poll_read(cx, &mut buf[offset..]) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => Poll::Ready(Err(Error::from(e))),
             Poll::Ready(Ok(0)) => Poll::Ready(Err(Error::Truncated)),
@@ -103,7 +102,7 @@ where
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub fn read_vec<S: Unpin>(src: &mut S) -> ReadVec<'_, S> {
+pub fn read_vec<S>(src: S) -> ReadVec<S> {
     ReadVec::ReadLen {
         src: Some(read_varint(src)),
         cap: u64::try_from(usize::MAX).unwrap_or(u64::MAX),

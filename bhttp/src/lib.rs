@@ -1,7 +1,11 @@
 #![deny(warnings, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
-use std::{borrow::BorrowMut, io};
+use std::{
+    borrow::BorrowMut,
+    io,
+    ops::{Deref, DerefMut},
+};
 
 #[cfg(feature = "http")]
 use url::Url;
@@ -25,7 +29,7 @@ const COOKIE: &[u8] = b"cookie";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct StatusCode(u16);
 
 impl StatusCode {
@@ -67,6 +71,26 @@ impl From<StatusCode> for u16 {
         value.code()
     }
 }
+
+#[cfg(test)]
+impl<T> PartialEq<T> for StatusCode
+where
+    Self: TryFrom<T>,
+    T: Copy,
+{
+    fn eq(&self, other: &T) -> bool {
+        StatusCode::try_from(*other).map_or(false, |o| o.0 == self.0)
+    }
+}
+
+#[cfg(not(test))]
+impl PartialEq<StatusCode> for StatusCode {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for StatusCode {}
 
 pub trait ReadSeek: io::BufRead + io::Seek {}
 impl<T> ReadSeek for io::Cursor<T> where T: AsRef<[u8]> {}
@@ -132,6 +156,18 @@ impl Field {
     }
 }
 
+#[cfg(test)]
+impl std::fmt::Debug for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{n}: {v}",
+            n = String::from_utf8_lossy(&self.name),
+            v = String::from_utf8_lossy(&self.value),
+        )
+    }
+}
+
 #[derive(Default)]
 pub struct FieldSection(Vec<Field>);
 impl FieldSection {
@@ -140,15 +176,26 @@ impl FieldSection {
         self.0.is_empty()
     }
 
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// Gets the value from the first instance of the field.
     #[must_use]
     pub fn get(&self, n: &[u8]) -> Option<&[u8]> {
-        for f in &self.0 {
+        self.get_all(n).next()
+    }
+
+    /// Gets all of the values of the named field.
+    pub fn get_all<'a, 'b>(&'a self, n: &'b [u8]) -> impl Iterator<Item = &'a [u8]> + use<'a, 'b> {
+        self.0.iter().filter_map(move |f| {
             if &f.name[..] == n {
-                return Some(&f.value);
+                Some(&f.value[..])
+            } else {
+                None
             }
-        }
-        None
+        })
     }
 
     pub fn put(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
@@ -332,6 +379,16 @@ impl FieldSection {
             f.write_http(w)?;
         }
         w.write_all(b"\r\n")?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for FieldSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        for fv in self.fields() {
+            fv.fmt(f)?;
+        }
         Ok(())
     }
 }
@@ -541,6 +598,68 @@ impl ControlData {
     }
 }
 
+#[cfg(test)]
+impl<M, S, A, P> PartialEq<(M, S, A, P)> for ControlData
+where
+    M: AsRef<[u8]>,
+    S: AsRef<[u8]>,
+    A: AsRef<[u8]>,
+    P: AsRef<[u8]>,
+{
+    fn eq(&self, other: &(M, S, A, P)) -> bool {
+        match self {
+            Self::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            } => {
+                method == other.0.as_ref()
+                    && scheme == other.1.as_ref()
+                    && authority == other.2.as_ref()
+                    && path == other.3.as_ref()
+            }
+            Self::Response(_) => false,
+        }
+    }
+}
+
+#[cfg(test)]
+impl<T> PartialEq<T> for ControlData
+where
+    StatusCode: TryFrom<T>,
+    T: Copy,
+{
+    fn eq(&self, other: &T) -> bool {
+        match self {
+            Self::Request { .. } => false,
+            Self::Response(code) => code == other,
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for ControlData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::Request {
+                method,
+                scheme,
+                authority,
+                path,
+            } => write!(
+                f,
+                "{m} {s}://{a}{p}",
+                m = String::from_utf8_lossy(method),
+                s = String::from_utf8_lossy(scheme),
+                a = String::from_utf8_lossy(authority),
+                p = String::from_utf8_lossy(path),
+            ),
+            Self::Response(code) => write!(f, "{code:?}"),
+        }
+    }
+}
+
 pub struct InformationalResponse {
     status: StatusCode,
     fields: FieldSection,
@@ -566,6 +685,20 @@ impl InformationalResponse {
         write_varint(self.status.code(), w)?;
         self.fields.write_bhttp(mode, w)?;
         Ok(())
+    }
+}
+
+impl Deref for InformationalResponse {
+    type Target = FieldSection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl DerefMut for InformationalResponse {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
     }
 }
 
@@ -606,6 +739,14 @@ impl std::ops::Deref for Header {
 impl std::ops::DerefMut for Header {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.fields
+    }
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        self.control.fmt(f)?;
+        self.fields.fmt(f)
     }
 }
 

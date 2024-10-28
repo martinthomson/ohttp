@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{TryStream, TryStreamExt};
+use futures::{AsyncRead, AsyncReadExt, TryStream, TryStreamExt};
 
 use crate::Error;
 
@@ -76,13 +76,31 @@ pub trait SyncCollect {
     fn sync_collect(self) -> Result<Vec<Self::Item>, Error>;
 }
 
-impl<S> SyncCollect for S
-where
-    S: TryStream<Error = Error>,
-{
+impl<S: TryStream<Error = Error>> SyncCollect for S {
     type Item = S::Ok;
 
     fn sync_collect(self) -> Result<Vec<Self::Item>, Error> {
         pin!(self.try_collect::<Vec<_>>()).sync_resolve()
+    }
+}
+
+pub trait SyncRead {
+    fn sync_read_exact(&mut self, amount: usize) -> Vec<u8>;
+    fn sync_read_to_end(&mut self) -> Vec<u8>;
+}
+
+impl<S: AsyncRead + Unpin> SyncRead for S {
+    fn sync_read_exact(&mut self, amount: usize) -> Vec<u8> {
+        let mut buf = vec![0; amount];
+        let res = self.read_exact(&mut buf[..]);
+        pin!(res).sync_resolve().unwrap();
+        buf
+    }
+
+    fn sync_read_to_end(&mut self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let res = self.read_to_end(&mut buf);
+        pin!(res).sync_resolve().unwrap();
+        buf
     }
 }
