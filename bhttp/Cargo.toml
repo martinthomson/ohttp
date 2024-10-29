@@ -9,9 +9,9 @@ description = "Binary HTTP messages (RFC 9292)"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
-default = ["stream"]
-http = ["url"]
-stream = ["futures", "pin-project"]
+default = []
+http = ["dep:url"]
+stream = ["dep:futures", "dep:pin-project"]
 
 [dependencies]
 futures = {version = "0.3", optional = true}
