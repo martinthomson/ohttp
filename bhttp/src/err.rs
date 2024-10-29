@@ -4,9 +4,6 @@ pub enum Error {
     ConnectUnsupported,
     #[error("a field contained invalid Unicode: {0}")]
     CharacterEncoding(#[from] std::string::FromUtf8Error),
-    #[error("a chunk of data of {0} bytes is too large")]
-    #[cfg(feature = "stream")]
-    ChunkTooLarge(u64),
     #[error("read a response when expecting a request")]
     ExpectedRequest,
     #[error("read a request when expecting a response")]
