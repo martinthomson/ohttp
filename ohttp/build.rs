@@ -8,14 +8,15 @@
 
 #[cfg(feature = "nss")]
 mod nss {
-    use bindgen::Builder;
-    use serde_derive::Deserialize;
     use std::{
         collections::HashMap,
         env, fs,
         path::{Path, PathBuf},
         process::Command,
     };
+
+    use bindgen::Builder;
+    use serde_derive::Deserialize;
 
     const BINDINGS_DIR: &str = "bindings";
     const BINDINGS_CONFIG: &str = "bindings.toml";
@@ -114,7 +115,6 @@ mod nss {
         let mut build_nss = vec![
             String::from("./build.sh"),
             String::from("-Ddisable_tests=1"),
-            String::from("-Denable_draft_hpke=1"),
         ];
         if is_debug() {
             build_nss.push(String::from("--static"));
@@ -191,16 +191,8 @@ mod nss {
     }
 
     fn static_link(nsslibdir: &Path, use_static_softoken: bool, use_static_nspr: bool) {
-        let mut static_libs = vec![
-            "certdb",
-            "certhi",
-            "cryptohi",
-            "nss_static",
-            "nssb",
-            "nssdev",
-            "nsspki",
-            "nssutil",
-        ];
+        // The ordering of these libraries is critical for the linker.
+        let mut static_libs = vec!["cryptohi", "nss_static"];
         let mut dynamic_libs = vec![];
 
         if use_static_softoken {
@@ -210,6 +202,8 @@ mod nss {
             // Use dlopen to get softokn3.so
             static_libs.push("pk11wrap");
         }
+
+        static_libs.extend_from_slice(&["nsspki", "nssdev", "nssb", "certhi", "certdb", "nssutil"]);
 
         if use_static_nspr {
             static_libs.append(&mut nspr_libs());
