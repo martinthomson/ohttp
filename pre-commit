@@ -6,10 +6,12 @@
 # $ ln -s ../../hooks/pre-commit .git/hooks/pre-commit
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)"
+RUST_FMT_CFG="imports_granularity=Crate,group_imports=StdExternalCrate"
 
 # Some sanity checking.
-hash cargo || exit 1
-[[ -n "$root" ]] || exit 1
+set -e
+hash cargo
+[[ -n "$root" ]]
 
 # Installation.
 if [[ "$1" == "install" ]]; then
@@ -23,31 +25,54 @@ if [[ "$1" == "install" ]]; then
     exit
 fi
 
-# Check formatting.
+# Stash unstaged changes
 if [[ "$1" != "all" ]]; then
-    msg="pre-commit stash @$(git rev-parse --short @) $RANDOM"
-    trap 'git stash list -1 --format="format:%s" | grep -q "'"$msg"'" && git stash pop -q' EXIT
-    git stash push -k -u -q -m "$msg"
+    stashdir="$(mktemp -d "$root"/.pre-commit.stashXXXXXX)"
+    msg="pre-commit stash @$(git rev-parse --short @) ${stashdir##*.stash}"
+    gitdir="$(git rev-parse --git-dir 2>/dev/null)"
+
+    stash() {
+        # Move MERGE_[HEAD|MODE|MSG] files to the root directory, and let `git stash push` save them.
+        find "$gitdir" -maxdepth 1 -name 'MERGE_*' -exec mv \{\} "$stashdir" \;
+        git stash push -k -u -q -m "$msg"
+    }
+
+    unstash() {
+        git stash list -1 --format="format:%s" | grep -q "$msg" && git stash pop -q
+        # Moves MERGE files restored by `git stash pop` back into .git/ directory.
+        if [[ -d "$stashdir" ]]; then
+            find "$stashdir" -exec mv -n \{\} "$gitdir" \;
+            rmdir "$stashdir"
+        fi
+    }
+
+    trap unstash EXIT
+    stash
 fi
-if ! errors=($(cargo fmt -- --check --config imports_granularity=crate -l)); then
-    echo "Formatting errors found."
-    echo "Run \`cargo fmt\` to fix the following files:"
+
+# Check formatting
+if ! errors=($(cargo fmt -- --check --config "$RUST_FMT_CFG" -l)); then
+    echo "Formatting errors found in:"
     for err in "${errors[@]}"; do
         echo "  $err"
     done
+    echo "To fix, run \`cargo fmt -- --config $RUST_FMT_CFG\`"
     exit 1
 fi
-if ! cargo clippy --tests; then
-    exit 1
-fi
-if ! cargo test; then
-    exit 1
-fi
+
+check() {
+    msg="$1"
+    shift
+    if ! echo "$@"; then
+        echo "${msg}: Failed command:"
+        echo "    ${@@Q}"
+        exit 1
+    fi
+}
+
+check "clippy" cargo clippy --tests
+check "test" cargo test
 if [[ -n "$NSS_DIR" ]]; then
-    if ! cargo clippy --tests --no-default-features --features nss; then
-        exit 1
-    fi
-    if ! cargo test --no-default-features --features nss; then
-        exit 1
-    fi
+    check "clippy(NSS)" cargo clippy --tests --no-default-features --features nss
+    check "test(NSS)" cargo test --no-default-features --features nss
 fi

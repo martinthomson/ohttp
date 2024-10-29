@@ -15,23 +15,15 @@ mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
 
-pub use crate::{
-    config::{KeyConfig, SymmetricSuite},
-    err::Error,
-};
-
-use crate::{
-    err::Res,
-    hpke::{Aead as AeadId, Kdf, Kem},
-};
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use log::trace;
 use std::{
     cmp::max,
     convert::TryFrom,
     io::{BufReader, Read},
     mem::size_of,
 };
+
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use log::trace;
 
 #[cfg(feature = "nss")]
 use crate::nss::random;
@@ -41,7 +33,6 @@ use crate::nss::{
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
 };
-
 #[cfg(feature = "rust-hpke")]
 use crate::rand::random;
 #[cfg(feature = "rust-hpke")]
@@ -49,6 +40,14 @@ use crate::rh::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
+};
+pub use crate::{
+    config::{KeyConfig, SymmetricSuite},
+    err::Error,
+};
+use crate::{
+    err::Res,
+    hpke::{Aead as AeadId, Kdf, Kem},
 };
 
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
@@ -312,14 +311,16 @@ impl ClientResponse {
 
 #[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
+    use std::{fmt::Debug, io::ErrorKind};
+
+    use log::trace;
+
     use crate::{
         config::SymmetricSuite,
         err::Res,
         hpke::{Aead, Kdf, Kem},
         ClientRequest, Error, KeyConfig, KeyId, Server,
     };
-    use log::trace;
-    use std::{fmt::Debug, io::ErrorKind};
 
     const KEY_ID: KeyId = 1;
     const KEM: Kem = Kem::X25519Sha256;

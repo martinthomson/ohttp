@@ -1,10 +1,3 @@
-use super::{
-    super::hpke::{Aead, Kdf, Kem},
-    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
-    p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey},
-};
-use crate::err::Res;
-use log::{log_enabled, trace};
 use std::{
     convert::TryFrom,
     ops::Deref,
@@ -12,7 +5,15 @@ use std::{
     ptr::{addr_of_mut, null, null_mut},
 };
 
+use log::{log_enabled, trace};
 pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
+
+use super::{
+    super::hpke::{Aead, Kdf, Kem},
+    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
+    p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey},
+};
+use crate::err::Res;
 
 /// Configuration for `Hpke`.
 #[derive(Clone, Copy)]

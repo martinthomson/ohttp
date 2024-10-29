@@ -1,3 +1,11 @@
+use std::{
+    convert::{TryFrom, TryInto},
+    mem,
+    os::raw::c_int,
+};
+
+use log::trace;
+
 use super::{
     err::secstatus_to_res,
     p11::{
@@ -12,12 +20,6 @@ use super::{
 use crate::{
     err::{Error, Res},
     hpke::Aead as AeadId,
-};
-use log::trace;
-use std::{
-    convert::{TryFrom, TryInto},
-    mem,
-    os::raw::c_int,
 };
 
 /// All the nonces are the same length.  Exploit that.

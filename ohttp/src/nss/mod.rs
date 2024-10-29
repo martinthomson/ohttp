@@ -11,11 +11,13 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
-pub use self::p11::{random, PrivateKey, PublicKey};
+use std::ptr::null;
+
 use err::secstatus_to_res;
 pub use err::Error;
 use lazy_static::lazy_static;
-use std::ptr::null;
+
+pub use self::p11::{random, PrivateKey, PublicKey};
 
 #[allow(clippy::pedantic, non_upper_case_globals, clippy::upper_case_acronyms)]
 mod nss_init {

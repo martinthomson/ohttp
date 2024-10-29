@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::err::{secstatus_to_res, Error};
-use crate::err::Res;
 use std::{
     convert::TryFrom,
     marker::PhantomData,
@@ -13,6 +11,9 @@ use std::{
     os::raw::{c_int, c_uint},
     ptr::null_mut,
 };
+
+use super::err::{secstatus_to_res, Error};
+use crate::err::Res;
 
 #[allow(
     clippy::pedantic,
