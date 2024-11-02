@@ -6,8 +6,6 @@ use std::{
 
 use futures::{AsyncRead, AsyncReadExt, TryStream, TryStreamExt};
 
-use crate::Error;
-
 fn noop_context() -> Context<'static> {
     use std::{
         ptr::null,
@@ -26,6 +24,7 @@ fn noop_context() -> Context<'static> {
     }
 
     pub fn noop_waker_ref() -> &'static Waker {
+        #[repr(transparent)]
         struct SyncRawWaker(RawWaker);
         unsafe impl Sync for SyncRawWaker {}
 
@@ -72,14 +71,16 @@ impl<F: Future + Unpin> SyncResolve for F {
 
 pub trait SyncCollect {
     type Item;
+    type Error;
 
-    fn sync_collect(self) -> Result<Vec<Self::Item>, Error>;
+    fn sync_collect(self) -> Result<Vec<Self::Item>, Self::Error>;
 }
 
-impl<S: TryStream<Error = Error>> SyncCollect for S {
+impl<S: TryStream> SyncCollect for S {
     type Item = S::Ok;
+    type Error = S::Error;
 
-    fn sync_collect(self) -> Result<Vec<Self::Item>, Error> {
+    fn sync_collect(self) -> Result<Vec<Self::Item>, Self::Error> {
         pin!(self.try_collect::<Vec<_>>()).sync_resolve()
     }
 }

@@ -6,5 +6,5 @@ members = [
   "ohttp",
   "ohttp-client",
   "ohttp-client-cli",
-  "ohttp-server",
+  "ohttp-server", "sync-async",
 ]

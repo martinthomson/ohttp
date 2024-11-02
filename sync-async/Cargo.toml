@@ -1,0 +1,12 @@
+[package]
+name = "sync-async"
+version = "0.5.3"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Synchronous Helpers for Async Code"
+repository = "https://github.com/martinthomson/ohttp"
+
+[dependencies]
+futures = "0.3"
+pin-project = "1.1"

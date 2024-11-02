@@ -21,3 +21,6 @@ url = {version = "2", optional = true}
 
 [dev-dependencies]
 hex = "0.4"
+
+[dev-dependencies.sync-async]
+path= "../sync-async"

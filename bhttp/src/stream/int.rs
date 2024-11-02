@@ -135,13 +135,12 @@ pub fn read_varint<S>(src: S) -> ReadVarint<S> {
 
 #[cfg(test)]
 mod test {
+    use sync_async::SyncResolve;
+
     use crate::{
         err::Error,
         rw::{write_uint as sync_write_uint, write_varint as sync_write_varint},
-        stream::{
-            future::SyncResolve,
-            int::{read_uint, read_varint},
-        },
+        stream::int::{read_uint, read_varint},
     };
 
     const VARINTS: &[u64] = &[
