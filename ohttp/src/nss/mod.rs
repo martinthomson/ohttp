@@ -15,7 +15,6 @@ use std::ptr::null;
 
 use err::secstatus_to_res;
 pub use err::Error;
-use lazy_static::lazy_static;
 
 pub use self::p11::{random, PrivateKey, PublicKey};
 
@@ -47,17 +46,7 @@ impl Drop for NssLoaded {
     }
 }
 
-lazy_static! {
-    static ref INITIALIZED: NssLoaded = {
-        if already_initialized() {
-            return NssLoaded::External;
-        }
-
-        secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-
-        NssLoaded::NoDb
-    };
-}
+static INITIALIZED: OnceLock<NssLoaded> = OnceLock::new();
 
 fn already_initialized() -> bool {
     unsafe { nss_init::NSS_IsInitialized() != 0 }
@@ -65,5 +54,13 @@ fn already_initialized() -> bool {
 
 /// Initialize NSS.  This only executes the initialization routines once.
 pub fn init() {
-    lazy_static::initialize(&INITIALIZED);
+    INITIALIZED.get_or_init(|| {
+        if already_initialized() {
+            NssLoaded::External
+        } else {
+            secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) })
+                .expect("NSS_NoDB_Init failed");
+            NssLoaded::NoDb
+        }
+    });
 }
