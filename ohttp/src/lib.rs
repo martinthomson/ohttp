@@ -14,6 +14,8 @@ mod nss;
 mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
+#[cfg(feature = "stream")]
+mod stream;
 
 use std::{
     cmp::max,
@@ -23,7 +25,10 @@ use std::{
 };
 
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "stream")]
+use futures::AsyncRead;
 use log::trace;
+use rh::hpke::PublicKey;
 
 #[cfg(feature = "nss")]
 use crate::nss::random;
@@ -41,6 +46,8 @@ use crate::rh::{
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
 };
+#[cfg(feature = "stream")]
+use crate::stream::ClientRequestStream;
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
@@ -53,8 +60,6 @@ use crate::{
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
 const REQUEST_HEADER_LEN: usize = size_of::<KeyId>() + 6;
 const INFO_REQUEST: &[u8] = b"message/bhttp request";
-/// The info used for HPKE export is `INFO_REQUEST`, a zero byte, and the header.
-const INFO_LEN: usize = INFO_REQUEST.len() + 1 + REQUEST_HEADER_LEN;
 const LABEL_RESPONSE: &[u8] = b"message/bhttp response";
 const INFO_KEY: &[u8] = b"key";
 const INFO_NONCE: &[u8] = b"nonce";
@@ -68,9 +73,9 @@ pub fn init() {
 }
 
 /// Construct the info parameter we use to initialize an `HpkeS` instance.
-fn build_info(key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
-    let mut info = Vec::with_capacity(INFO_LEN);
-    info.extend_from_slice(INFO_REQUEST);
+fn build_info(label: &[u8], key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
+    let mut info = Vec::with_capacity(label.len() + 1 + REQUEST_HEADER_LEN);
+    info.extend_from_slice(label);
     info.push(0);
     info.write_u8(key_id)?;
     info.write_u16::<NetworkEndian>(u16::from(config.kem()))?;
@@ -84,8 +89,9 @@ fn build_info(key_id: KeyId, config: HpkeConfig) -> Res<Vec<u8>> {
 /// This might not be necessary if we agree on a format.
 #[cfg(feature = "client")]
 pub struct ClientRequest {
-    hpke: HpkeS,
-    header: Vec<u8>,
+    key_id: KeyId,
+    config: HpkeConfig,
+    pk: PublicKey,
 }
 
 #[cfg(feature = "client")]
@@ -94,14 +100,11 @@ impl ClientRequest {
     pub fn from_config(config: &mut KeyConfig) -> Res<Self> {
         // TODO(mt) choose the best config, not just the first.
         let selected = config.select(config.symmetric[0])?;
-
-        // Build the info, which contains the message header.
-        let info = build_info(config.key_id, selected)?;
-        let hpke = HpkeS::new(selected, &mut config.pk, &info)?;
-
-        let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
-        debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
-        Ok(Self { hpke, header })
+        Ok(Self {
+            key_id: config.key_id,
+            config: selected,
+            pk: config.pk.clone(),
+        })
     }
 
     /// Reads an encoded configuration and constructs a single use client sender.
@@ -126,21 +129,41 @@ impl ClientRequest {
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
     pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
-        let extra =
-            self.hpke.config().kem().n_enc() + self.hpke.config().aead().n_t() + request.len();
-        let expected_len = self.header.len() + extra;
+        // Build the info, which contains the message header.
+        let info = build_info(INFO_REQUEST, self.key_id, self.config)?;
+        let mut hpke = HpkeS::new(self.config, &mut self.pk, &info)?;
 
-        let mut enc_request = self.header;
+        let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
+        debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
+
+        let extra = hpke.config().kem().n_enc() + hpke.config().aead().n_t() + request.len();
+        let expected_len = header.len() + extra;
+
+        let mut enc_request = header;
         enc_request.reserve_exact(extra);
 
-        let enc = self.hpke.enc()?;
+        let enc = hpke.enc()?;
         enc_request.extend_from_slice(&enc);
 
-        let mut ct = self.hpke.seal(&[], request)?;
+        let mut ct = hpke.seal(&[], request)?;
         enc_request.append(&mut ct);
 
         debug_assert_eq!(expected_len, enc_request.len());
-        Ok((enc_request, ClientResponse::new(self.hpke, enc)))
+        Ok((enc_request, ClientResponse::new(hpke, enc)))
+    }
+
+    #[cfg(feature = "stream")]
+    pub fn encapsulate_stream<S: AsyncRead>(mut self, src: S) -> Res<ClientRequestStream<S>> {
+        let info = build_info(crate::stream::INFO_REQUEST, self.key_id, self.config)?;
+        let hpke = HpkeS::new(self.config, &mut self.pk, &info)?;
+
+        let mut header = Vec::from(&info[crate::stream::INFO_REQUEST.len() + 1..]);
+        debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
+
+        let mut e = hpke.enc()?;
+        header.append(&mut e);
+
+        Ok(ClientRequestStream::new(src, hpke, header))
     }
 }
 
@@ -191,6 +214,7 @@ impl Server {
         let sym = SymmetricSuite::new(kdf_id, aead_id);
 
         let info = build_info(
+            INFO_REQUEST,
             key_id,
             HpkeConfig::new(self.config.kem, sym.kdf(), sym.aead()),
         )?;
