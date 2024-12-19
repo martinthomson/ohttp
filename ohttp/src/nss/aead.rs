@@ -159,12 +159,44 @@ impl Aead {
         Ok(ct)
     }
 
-    pub fn open(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
+    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+        assert_eq!(self.mode, Mode::Decrypt);
+        let mut nonce = self.nonce_base;
+        let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
+        let mut pt_len: c_int = 0;
+        let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
+        secstatus_to_res(unsafe {
+            PK11_AEADOp(
+                *self.ctx,
+                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
+                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
+                nonce.as_mut_ptr(),
+                c_int_len(nonce.len()),
+                aad.as_ptr(),
+                c_int_len(aad.len()),
+                pt.as_mut_ptr(),
+                &mut pt_len,
+                c_int_len(pt.len()),                     // signed :(
+                ct.as_ptr().add(pt_expected).cast_mut(), // const cast :(
+                c_int_len(TAG_LEN),
+                ct.as_ptr(),
+                c_int_len(pt_expected),
+            )
+        })?;
+        let len = usize::try_from(pt_len).unwrap();
+        debug_assert_eq!(len, pt_expected);
+        pt.truncate(len);
+        Ok(pt)
+    }
+
+    #[allow(dead_code)]
+    pub fn open_seq(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
         let mut nonce = self.nonce_base;
         for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
             *n ^= u8::try_from((seq >> (8 * i)) & 0xff).unwrap();
         }
+
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
@@ -179,8 +211,8 @@ impl Aead {
                 c_int_len(aad.len()),
                 pt.as_mut_ptr(),
                 &mut pt_len,
-                c_int_len(pt.len()),                    // signed :(
-                ct.as_ptr().add(pt_expected) as *mut _, // const cast :(
+                c_int_len(pt.len()),                     // signed :(
+                ct.as_ptr().add(pt_expected).cast_mut(), // const cast :(
                 c_int_len(TAG_LEN),
                 ct.as_ptr(),
                 c_int_len(pt_expected),
@@ -218,7 +250,7 @@ mod test {
         assert_eq!(&ciphertext[..], ct);
 
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
-        let plaintext = dec.open(aad, 0, ct).unwrap();
+        let plaintext = dec.open(aad, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
     }
 
@@ -233,7 +265,7 @@ mod test {
     ) {
         let k = Aead::import_key(algorithm, key).unwrap();
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
-        let plaintext = dec.open(aad, seq, ct).unwrap();
+        let plaintext = dec.open_seq(aad, seq, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
     }
 

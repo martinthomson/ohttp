@@ -5,9 +5,15 @@ pub enum Error {
     #[cfg(feature = "rust-hpke")]
     #[error("a problem occurred with the AEAD")]
     Aead(#[from] aead::Error),
+    #[cfg(feature = "stream")]
+    #[error("a stream chunk was larger than the maximum allowed size")]
+    ChunkTooLarge,
     #[cfg(feature = "nss")]
     #[error("a problem occurred during cryptographic processing: {0}")]
     Crypto(#[from] crate::nss::Error),
+    #[cfg(feature = "stream")]
+    #[error("a stream contained data after the last chunk")]
+    ExtraData,
     #[error("an error was found in the format")]
     Format,
     #[cfg(all(feature = "rust-hpke", not(feature = "pq")))]

@@ -4,6 +4,8 @@
     not(all(feature = "client", feature = "server")),
     allow(dead_code, unused_imports)
 )]
+#[cfg(all(feature = "nss", feature = "rust-hpke"))]
+compile_error!("features \"nss\" and \"rust-hpke\" are mutually incompatible");
 
 mod config;
 mod err;
@@ -20,34 +22,22 @@ mod stream;
 use std::{
     cmp::max,
     convert::TryFrom,
-    io::{BufReader, Read},
+    io::{Cursor, Read},
     mem::size_of,
 };
 
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-#[cfg(feature = "stream")]
-use futures::AsyncRead;
 use log::trace;
-use rh::hpke::PublicKey;
 
-#[cfg(feature = "nss")]
-use crate::nss::random;
 #[cfg(feature = "nss")]
 use crate::nss::{
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
-};
-#[cfg(feature = "rust-hpke")]
-use crate::rand::random;
-#[cfg(feature = "rust-hpke")]
-use crate::rh::{
-    aead::{Aead, Mode, NONCE_LEN},
-    hkdf::{Hkdf, KeyMechanism},
-    hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
+    random, PublicKey, SymKey,
 };
 #[cfg(feature = "stream")]
-use crate::stream::ClientRequestStream;
+use crate::stream::{ClientRequest as StreamClient, ServerRequest as StreamServer};
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
@@ -55,6 +45,16 @@ pub use crate::{
 use crate::{
     err::Res,
     hpke::{Aead as AeadId, Kdf, Kem},
+};
+#[cfg(feature = "rust-hpke")]
+use crate::{
+    rand::random,
+    rh::{
+        aead::{Aead, Mode, NONCE_LEN},
+        hkdf::{Hkdf, KeyMechanism},
+        hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS, PublicKey},
+        SymKey,
+    },
 };
 
 /// The request header is a `KeyId` and 2 each for KEM, KDF, and AEAD identifiers
@@ -153,17 +153,8 @@ impl ClientRequest {
     }
 
     #[cfg(feature = "stream")]
-    pub fn encapsulate_stream<S: AsyncRead>(mut self, src: S) -> Res<ClientRequestStream<S>> {
-        let info = build_info(crate::stream::INFO_REQUEST, self.key_id, self.config)?;
-        let hpke = HpkeS::new(self.config, &mut self.pk, &info)?;
-
-        let mut header = Vec::from(&info[crate::stream::INFO_REQUEST.len() + 1..]);
-        debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
-
-        let mut e = hpke.enc()?;
-        header.append(&mut e);
-
-        Ok(ClientRequestStream::new(src, hpke, header))
+    pub fn encapsulate_stream<S>(self, dst: S) -> Res<StreamClient<S>> {
+        StreamClient::start(dst, self.config, self.key_id, self.pk)
     }
 }
 
@@ -192,15 +183,8 @@ impl Server {
         &self.config
     }
 
-    /// Remove encapsulation on a message.
-    /// # Panics
-    /// Not as a consequence of this code, but Rust won't know that for sure.
     #[allow(clippy::similar_names)] // for kem_id and key_id
-    pub fn decapsulate(&self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
-        if enc_request.len() < REQUEST_HEADER_LEN {
-            return Err(Error::Truncated);
-        }
-        let mut r = BufReader::new(enc_request);
+    fn decode_hpke_config(&self, r: &mut Cursor<&[u8]>) -> Res<HpkeConfig> {
         let key_id = r.read_u8()?;
         if key_id != self.config.key_id {
             return Err(Error::KeyId);
@@ -211,30 +195,49 @@ impl Server {
         }
         let kdf_id = Kdf::try_from(r.read_u16::<NetworkEndian>()?)?;
         let aead_id = AeadId::try_from(r.read_u16::<NetworkEndian>()?)?;
-        let sym = SymmetricSuite::new(kdf_id, aead_id);
+        let hpke_config = HpkeConfig::new(self.config.kem, kdf_id, aead_id);
+        Ok(hpke_config)
+    }
 
-        let info = build_info(
-            INFO_REQUEST,
-            key_id,
-            HpkeConfig::new(self.config.kem, sym.kdf(), sym.aead()),
-        )?;
+    fn decode_request_header(&self, r: &mut Cursor<&[u8]>, label: &[u8]) -> Res<(HpkeR, Vec<u8>)> {
+        let hpke_config = self.decode_hpke_config(r)?;
+        let sym = SymmetricSuite::new(hpke_config.kdf(), hpke_config.aead());
+        let config = self.config.select(sym)?;
+        let info = build_info(label, self.config.key_id, hpke_config)?;
 
-        let cfg = self.config.select(sym)?;
-        let mut enc = vec![0; cfg.kem().n_enc()];
+        let mut enc = vec![0; config.kem().n_enc()];
         r.read_exact(&mut enc)?;
-        let mut hpke = HpkeR::new(
-            cfg,
-            &self.config.pk,
-            self.config.sk.as_ref().unwrap(),
-            &enc,
-            &info,
-        )?;
 
-        let mut ct = Vec::new();
-        r.read_to_end(&mut ct)?;
+        Ok((
+            HpkeR::new(
+                config,
+                &self.config.pk,
+                self.config.sk.as_ref().unwrap(),
+                &enc,
+                &info,
+            )?,
+            enc,
+        ))
+    }
 
-        let request = hpke.open(&[], &ct)?;
+    /// Remove encapsulation on a request.
+    /// # Panics
+    /// Not as a consequence of this code, but Rust won't know that for sure.
+    pub fn decapsulate(&self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
+        if enc_request.len() <= REQUEST_HEADER_LEN {
+            return Err(Error::Truncated);
+        }
+        let mut r = Cursor::new(enc_request);
+        let (mut hpke, enc) = self.decode_request_header(&mut r, INFO_REQUEST)?;
+
+        let request = hpke.open(&[], &enc_request[usize::try_from(r.position())?..])?;
         Ok((request, ServerResponse::new(&hpke, enc)?))
+    }
+
+    /// Remove encapsulation on a streamed request.
+    #[cfg(feature = "stream")]
+    pub fn decapsulate_stream<S>(self, src: S) -> StreamServer<S> {
+        StreamServer::new(self.config, src)
     }
 }
 
@@ -242,19 +245,22 @@ fn entropy(config: HpkeConfig) -> usize {
     max(config.aead().n_n(), config.aead().n_k())
 }
 
+fn export_secret<E: Exporter>(exp: &E, label: &[u8], cfg: HpkeConfig) -> Res<SymKey> {
+    exp.export(label, entropy(cfg))
+}
+
 fn make_aead(
     mode: Mode,
     cfg: HpkeConfig,
-    exp: &impl Exporter,
+    secret: &SymKey,
     enc: Vec<u8>,
-    response_nonce: &[u8],
+    nonce: &[u8],
 ) -> Res<Aead> {
-    let secret = exp.export(LABEL_RESPONSE, entropy(cfg))?;
     let mut salt = enc;
-    salt.extend_from_slice(response_nonce);
+    salt.extend_from_slice(nonce);
 
     let hkdf = Hkdf::new(cfg.kdf());
-    let prk = hkdf.extract(&salt, &secret)?;
+    let prk = hkdf.extract(&salt, secret)?;
 
     let key = hkdf.expand_key(&prk, INFO_KEY, KeyMechanism::Aead(cfg.aead()))?;
     let iv = hkdf.expand_data(&prk, INFO_NONCE, cfg.aead().n_n())?;
@@ -275,7 +281,13 @@ pub struct ServerResponse {
 impl ServerResponse {
     fn new(hpke: &HpkeR, enc: Vec<u8>) -> Res<Self> {
         let response_nonce = random(entropy(hpke.config()));
-        let aead = make_aead(Mode::Encrypt, hpke.config(), hpke, enc, &response_nonce)?;
+        let aead = make_aead(
+            Mode::Encrypt,
+            hpke.config(),
+            &export_secret(hpke, LABEL_RESPONSE, hpke.config())?,
+            enc,
+            &response_nonce,
+        )?;
         Ok(Self {
             response_nonce,
             aead,
@@ -325,11 +337,11 @@ impl ClientResponse {
         let mut aead = make_aead(
             Mode::Decrypt,
             self.hpke.config(),
-            &self.hpke,
+            &export_secret(&self.hpke, LABEL_RESPONSE, self.hpke.config())?,
             self.enc,
             response_nonce,
         )?;
-        aead.open(&[], 0, ct) // 0 is the sequence number
+        aead.open(&[], ct) // 0 is the sequence number
     }
 }
 
@@ -346,29 +358,33 @@ mod test {
         ClientRequest, Error, KeyConfig, KeyId, Server,
     };
 
-    const KEY_ID: KeyId = 1;
-    const KEM: Kem = Kem::X25519Sha256;
-    const SYMMETRIC: &[SymmetricSuite] = &[
+    pub const KEY_ID: KeyId = 1;
+    pub const KEM: Kem = Kem::X25519Sha256;
+    pub const SYMMETRIC: &[SymmetricSuite] = &[
         SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm),
         SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305),
     ];
 
-    const REQUEST: &[u8] = &[
+    pub const REQUEST: &[u8] = &[
         0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78, 0x61,
         0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x01, 0x2f,
     ];
-    const RESPONSE: &[u8] = &[0x01, 0x40, 0xc8];
+    pub const RESPONSE: &[u8] = &[0x01, 0x40, 0xc8];
 
-    fn init() {
+    pub fn init() {
         crate::init();
         _ = env_logger::try_init(); // ignore errors here
+    }
+
+    pub fn make_config() -> KeyConfig {
+        KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap()
     }
 
     #[test]
     fn request_response() {
         init();
 
-        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let server_config = make_config();
         let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
         trace!("Config: {}", hex::encode(&encoded_config));
@@ -393,7 +409,7 @@ mod test {
     fn two_requests() {
         init();
 
-        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let server_config = make_config();
         let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
@@ -433,7 +449,7 @@ mod test {
     fn request_truncated(cut: usize) {
         init();
 
-        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let server_config = make_config();
         let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
@@ -464,7 +480,7 @@ mod test {
     fn response_truncated(cut: usize) {
         init();
 
-        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let server_config = make_config();
         let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 
@@ -523,7 +539,7 @@ mod test {
     fn request_from_config_list() {
         init();
 
-        let server_config = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap();
+        let server_config = make_config();
         let server = Server::new(server_config).unwrap();
         let encoded_config = server.config().encode().unwrap();
 

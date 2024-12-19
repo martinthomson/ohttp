@@ -121,12 +121,9 @@ mod test {
     };
 
     use futures::AsyncRead;
+    use sync_async::SyncResolve;
 
-    use crate::{
-        rw::write_varint as sync_write_varint,
-        stream::{future::SyncResolve, vec::read_vec},
-        Error,
-    };
+    use crate::{rw::write_varint as sync_write_varint, stream::vec::read_vec, Error};
 
     const FILL_VALUE: u8 = 90;
 

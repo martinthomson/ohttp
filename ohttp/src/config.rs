@@ -95,18 +95,15 @@ impl KeyConfig {
             Self::strip_unsupported(&mut symmetric, kem);
             assert!(!symmetric.is_empty());
             let (sk, pk) = derive_key_pair(kem, ikm)?;
-            Ok(Self {
+            return Ok(Self {
                 key_id,
                 kem,
                 symmetric,
                 sk: Some(sk),
                 pk,
-            })
+            });
         }
-        #[cfg(not(feature = "rust-hpke"))]
-        {
-            Err(Error::Unsupported)
-        }
+        Err(Error::Unsupported)
     }
 
     /// Encode a list of key configurations.

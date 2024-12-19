@@ -16,8 +16,6 @@ use crate::{
     stream::{int::read_varint, vec::read_vec},
     ControlData, Error, Field, FieldSection, Header, InformationalResponse, Message, Mode, COOKIE,
 };
-#[cfg(test)]
-mod future;
 mod int;
 mod vec;
 
@@ -413,14 +411,9 @@ mod test {
     use std::pin::pin;
 
     use futures::TryStreamExt;
+    use sync_async::{Dribble, SyncRead, SyncResolve, SyncTryCollect};
 
-    use crate::{
-        stream::{
-            future::{Dribble, SyncCollect, SyncRead, SyncResolve},
-            AsyncReadMessage,
-        },
-        Error, Message,
-    };
+    use crate::{stream::AsyncReadMessage, Error, Message};
 
     // Example from Section 5.1 of RFC 9292.
     const REQUEST1: &[u8] = &[

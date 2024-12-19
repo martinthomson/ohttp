@@ -1,5 +1,3 @@
-#![allow(dead_code)] // TODO: remove
-
 use std::convert::TryFrom;
 
 use aead::{AeadMut, Key, NewAead, Nonce, Payload};
@@ -12,7 +10,6 @@ use crate::{err::Res, hpke::Aead as AeadId};
 /// All the nonces are the same length.  Exploit that.
 pub const NONCE_LEN: usize = 12;
 const COUNTER_LEN: usize = 8;
-const TAG_LEN: usize = 16;
 
 type SequenceNumber = u64;
 
@@ -111,7 +108,13 @@ impl Aead {
         Ok(ct)
     }
 
-    pub fn open(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
+    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+        let res = self.open_seq(aad, self.seq, ct);
+        self.seq += 1;
+        res
+    }
+
+    pub fn open_seq(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
         let nonce = self.nonce(seq);
         let pt = self.engine.decrypt(&nonce, Payload { msg: ct, aad })?;
@@ -144,7 +147,7 @@ mod test {
         assert_eq!(&ciphertext[..], ct);
 
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
-        let plaintext = dec.open(aad, 0, ct).unwrap();
+        let plaintext = dec.open(aad, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
     }
 
@@ -159,7 +162,7 @@ mod test {
     ) {
         let k = Aead::import_key(algorithm, key).unwrap();
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
-        let plaintext = dec.open(aad, seq, ct).unwrap();
+        let plaintext = dec.open_seq(aad, seq, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
     }
 

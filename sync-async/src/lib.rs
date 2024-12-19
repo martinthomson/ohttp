@@ -1,10 +1,12 @@
 use std::{
     future::Future,
+    io::Result as IoResult,
     pin::{pin, Pin},
     task::{Context, Poll},
 };
 
-use futures::{AsyncRead, AsyncReadExt, TryStream, TryStreamExt};
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, TryStream, TryStreamExt};
+use pin_project::pin_project;
 
 fn noop_context() -> Context<'static> {
     use std::{
@@ -69,14 +71,17 @@ impl<F: Future + Unpin> SyncResolve for F {
     }
 }
 
-pub trait SyncCollect {
+pub trait SyncTryCollect {
     type Item;
     type Error;
 
+    /// Synchronously gather all items from a stream.
+    /// # Errors
+    /// When the underlying source produces an error.
     fn sync_collect(self) -> Result<Vec<Self::Item>, Self::Error>;
 }
 
-impl<S: TryStream> SyncCollect for S {
+impl<S: TryStream> SyncTryCollect for S {
     type Item = S::Ok;
     type Error = S::Error;
 
@@ -106,13 +111,15 @@ impl<S: AsyncRead + Unpin> SyncRead for S {
     }
 }
 
+#[pin_project(project = DribbleProjection)]
 pub struct Dribble<S> {
-    src: S,
+    #[pin]
+    s: S,
 }
 
 impl<S> Dribble<S> {
-    pub fn new(src: S) -> Self {
-        Self { src }
+    pub fn new(s: S) -> Self {
+        Self { s }
     }
 }
 
@@ -121,7 +128,78 @@ impl<S: AsyncRead + Unpin> AsyncRead for Dribble<S> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
-        pin!(&mut self.src).poll_read(cx, &mut buf[..1])
+    ) -> Poll<IoResult<usize>> {
+        pin!(&mut self.s).poll_read(cx, &mut buf[..1])
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Dribble<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
+        let mut this = self.project();
+        this.s.as_mut().poll_write(cx, &buf[..1])
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        let mut this = self.project();
+        this.s.as_mut().poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        let mut this = self.project();
+        this.s.as_mut().poll_close(cx)
+    }
+}
+
+#[pin_project(project = StutterProjection)]
+pub struct Stutter<S> {
+    stall: bool,
+    #[pin]
+    s: S,
+}
+
+impl<S> Stutter<S> {
+    pub fn new(s: S) -> Self {
+        Self { stall: false, s }
+    }
+
+    fn stutter<T, F>(self: Pin<&mut Self>, cx: &mut Context<'_>, f: F) -> Poll<T>
+    where
+        F: FnOnce(Pin<&mut S>, &mut Context<'_>) -> Poll<T>,
+    {
+        let mut this = self.project();
+        *this.stall = !*this.stall;
+        if *this.stall {
+            // When returning `Poll::Pending`, you have to wake the task.
+            // We aren't running code anywhere except here,
+            // so call it here and ensure that the task is picked up.
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        } else {
+            f(this.s.as_mut(), cx)
+        }
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Stutter<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        Self::stutter(self, cx, |s, cx| s.poll_read(cx, buf))
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Stutter<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
+        Self::stutter(self, cx, |s, cx| s.poll_write(cx, buf))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Self::stutter(self, cx, AsyncWrite::poll_flush)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Self::stutter(self, cx, AsyncWrite::poll_close)
     }
 }

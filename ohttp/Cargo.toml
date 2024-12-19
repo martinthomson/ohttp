@@ -10,7 +10,7 @@ description = "Oblivious HTTP"
 repository = "https://github.com/martinthomson/ohttp"
 
 [features]
-default = ["client", "server", "rust-hpke", "stream"]
+default = ["client", "server", "nss", "stream"]
 app-svc = ["nss"]
 client = []
 external-sqlite = []
