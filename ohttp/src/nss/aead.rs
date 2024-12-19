@@ -18,6 +18,7 @@ use super::{
     },
 };
 use crate::{
+    crypto::{Decrypt, Encrypt},
     err::{Error, Res},
     hpke::Aead as AeadId,
 };
@@ -69,6 +70,7 @@ impl Mode {
 /// This is an AEAD instance that uses the
 pub struct Aead {
     mode: Mode,
+    algorithm: AeadId,
     ctx: Context,
     nonce_base: [u8; NONCE_LEN],
 }
@@ -120,73 +122,10 @@ impl Aead {
         };
         Ok(Self {
             mode,
+            algorithm,
             ctx: Context::from_ptr(ptr)?,
             nonce_base,
         })
-    }
-
-    pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
-        assert_eq!(self.mode, Mode::Encrypt);
-        // A copy for the nonce generator to write into.  But we don't use the value.
-        let mut nonce = self.nonce_base;
-        // Ciphertext with enough space for the tag.
-        // Even though we give the operation a separate buffer for the tag,
-        // reserve the capacity on allocation.
-        let mut ct = vec![0; pt.len() + TAG_LEN];
-        let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
-        secstatus_to_res(unsafe {
-            PK11_AEADOp(
-                *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
-                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
-                nonce.as_mut_ptr(),
-                c_int_len(nonce.len()),
-                aad.as_ptr(),
-                c_int_len(aad.len()),
-                ct.as_mut_ptr(),
-                &mut ct_len,
-                c_int_len(ct.len()), // signed :(
-                tag.as_mut_ptr(),
-                c_int_len(tag.len()),
-                pt.as_ptr(),
-                c_int_len(pt.len()),
-            )
-        })?;
-        ct.truncate(usize::try_from(ct_len).unwrap());
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
-        Ok(ct)
-    }
-
-    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
-        assert_eq!(self.mode, Mode::Decrypt);
-        let mut nonce = self.nonce_base;
-        let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
-        let mut pt_len: c_int = 0;
-        let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
-        secstatus_to_res(unsafe {
-            PK11_AEADOp(
-                *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
-                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
-                nonce.as_mut_ptr(),
-                c_int_len(nonce.len()),
-                aad.as_ptr(),
-                c_int_len(aad.len()),
-                pt.as_mut_ptr(),
-                &mut pt_len,
-                c_int_len(pt.len()),                     // signed :(
-                ct.as_ptr().add(pt_expected).cast_mut(), // const cast :(
-                c_int_len(TAG_LEN),
-                ct.as_ptr(),
-                c_int_len(pt_expected),
-            )
-        })?;
-        let len = usize::try_from(pt_len).unwrap();
-        debug_assert_eq!(len, pt_expected);
-        pt.truncate(len);
-        Ok(pt)
     }
 
     #[allow(dead_code)]
@@ -225,12 +164,89 @@ impl Aead {
     }
 }
 
+impl Decrypt for Aead {
+    fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+        assert_eq!(self.mode, Mode::Decrypt);
+        let mut nonce = self.nonce_base;
+        let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
+        let mut pt_len: c_int = 0;
+        let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
+        secstatus_to_res(unsafe {
+            PK11_AEADOp(
+                *self.ctx,
+                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
+                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
+                nonce.as_mut_ptr(),
+                c_int_len(nonce.len()),
+                aad.as_ptr(),
+                c_int_len(aad.len()),
+                pt.as_mut_ptr(),
+                &mut pt_len,
+                c_int_len(pt.len()),                     // signed :(
+                ct.as_ptr().add(pt_expected).cast_mut(), // const cast :(
+                c_int_len(TAG_LEN),
+                ct.as_ptr(),
+                c_int_len(pt_expected),
+            )
+        })?;
+        let len = usize::try_from(pt_len).unwrap();
+        debug_assert_eq!(len, pt_expected);
+        pt.truncate(len);
+        Ok(pt)
+    }
+
+    fn alg(&self) -> AeadId {
+        self.algorithm
+    }
+}
+
+impl Encrypt for Aead {
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
+        assert_eq!(self.mode, Mode::Encrypt);
+        // A copy for the nonce generator to write into.  But we don't use the value.
+        let mut nonce = self.nonce_base;
+        // Ciphertext with enough space for the tag.
+        // Even though we give the operation a separate buffer for the tag,
+        // reserve the capacity on allocation.
+        let mut ct = vec![0; pt.len() + TAG_LEN];
+        let mut ct_len: c_int = 0;
+        let mut tag = vec![0; TAG_LEN];
+        secstatus_to_res(unsafe {
+            PK11_AEADOp(
+                *self.ctx,
+                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
+                c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
+                nonce.as_mut_ptr(),
+                c_int_len(nonce.len()),
+                aad.as_ptr(),
+                c_int_len(aad.len()),
+                ct.as_mut_ptr(),
+                &mut ct_len,
+                c_int_len(ct.len()), // signed :(
+                tag.as_mut_ptr(),
+                c_int_len(tag.len()),
+                pt.as_ptr(),
+                c_int_len(pt.len()),
+            )
+        })?;
+        ct.truncate(usize::try_from(ct_len).unwrap());
+        debug_assert_eq!(ct.len(), pt.len());
+        ct.append(&mut tag);
+        Ok(ct)
+    }
+
+    fn alg(&self) -> AeadId {
+        self.algorithm
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{
         super::{super::hpke::Aead as AeadId, init},
         Aead, Mode, SequenceNumber, NONCE_LEN,
     };
+    use crate::crypto::{Decrypt, Encrypt};
 
     /// Check that the first invocation of encryption matches expected values.
     /// Also check decryption of the same.

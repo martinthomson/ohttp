@@ -27,7 +27,7 @@ use std::{
     mem::size_of,
 };
 
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{NetworkEndian, WriteBytesExt};
 use crypto::{Decrypt, Encrypt};
 use log::trace;
 
@@ -39,15 +39,12 @@ use crate::nss::{
     random, PublicKey, SymKey,
 };
 #[cfg(feature = "stream")]
-use crate::stream::{ClientRequest as StreamClient, ServerRequest as StreamServer};
+use crate::stream::{ClientRequest as StreamClient, ServerRequest as ServerRequestStream};
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
 };
-use crate::{
-    err::Res,
-    hpke::{Aead as AeadId, Kdf, Kem},
-};
+use crate::{err::Res, hpke::Aead as AeadId};
 #[cfg(feature = "rust-hpke")]
 use crate::{
     rand::random,
@@ -185,24 +182,8 @@ impl Server {
         &self.config
     }
 
-    #[allow(clippy::similar_names)] // for kem_id and key_id
-    fn decode_hpke_config(&self, r: &mut Cursor<&[u8]>) -> Res<HpkeConfig> {
-        let key_id = r.read_u8()?;
-        if key_id != self.config.key_id {
-            return Err(Error::KeyId);
-        }
-        let kem_id = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
-        if kem_id != self.config.kem {
-            return Err(Error::InvalidKem);
-        }
-        let kdf_id = Kdf::try_from(r.read_u16::<NetworkEndian>()?)?;
-        let aead_id = AeadId::try_from(r.read_u16::<NetworkEndian>()?)?;
-        let hpke_config = HpkeConfig::new(self.config.kem, kdf_id, aead_id);
-        Ok(hpke_config)
-    }
-
     fn decode_request_header(&self, r: &mut Cursor<&[u8]>, label: &[u8]) -> Res<(HpkeR, Vec<u8>)> {
-        let hpke_config = self.decode_hpke_config(r)?;
+        let hpke_config = self.config.decode_hpke_config(r)?;
         let sym = SymmetricSuite::new(hpke_config.kdf(), hpke_config.aead());
         let config = self.config.select(sym)?;
         let info = build_info(label, self.config.key_id, hpke_config)?;
@@ -233,13 +214,13 @@ impl Server {
         let (mut hpke, enc) = self.decode_request_header(&mut r, INFO_REQUEST)?;
 
         let request = hpke.open(&[], &enc_request[usize::try_from(r.position())?..])?;
-        Ok((request, ServerResponse::new(&hpke, enc)?))
+        Ok((request, ServerResponse::new(&hpke, &enc)?))
     }
 
     /// Remove encapsulation on a streamed request.
     #[cfg(feature = "stream")]
-    pub fn decapsulate_stream<S>(self, src: S) -> StreamServer<S> {
-        StreamServer::new(self.config, src)
+    pub fn decapsulate_stream<S>(self, src: S) -> ServerRequestStream<S> {
+        ServerRequestStream::new(self.config, src)
     }
 }
 
@@ -251,14 +232,8 @@ fn export_secret<E: Exporter>(exp: &E, label: &[u8], cfg: HpkeConfig) -> Res<Sym
     exp.export(label, entropy(cfg))
 }
 
-fn make_aead(
-    mode: Mode,
-    cfg: HpkeConfig,
-    secret: &SymKey,
-    enc: Vec<u8>,
-    nonce: &[u8],
-) -> Res<Aead> {
-    let mut salt = enc;
+fn make_aead(mode: Mode, cfg: HpkeConfig, secret: &SymKey, enc: &[u8], nonce: &[u8]) -> Res<Aead> {
+    let mut salt = enc.to_vec();
     salt.extend_from_slice(nonce);
 
     let hkdf = Hkdf::new(cfg.kdf());
@@ -281,7 +256,7 @@ pub struct ServerResponse {
 
 #[cfg(feature = "server")]
 impl ServerResponse {
-    fn new(hpke: &HpkeR, enc: Vec<u8>) -> Res<Self> {
+    fn new(hpke: &HpkeR, enc: &[u8]) -> Res<Self> {
         let response_nonce = random(entropy(hpke.config()));
         let aead = make_aead(
             Mode::Encrypt,
@@ -340,7 +315,7 @@ impl ClientResponse {
             Mode::Decrypt,
             self.hpke.config(),
             &export_secret(&self.hpke, LABEL_RESPONSE, self.hpke.config())?,
-            self.enc,
+            &self.enc,
             response_nonce,
         )?;
         aead.open(&[], ct) // 0 is the sequence number

@@ -149,6 +149,10 @@ impl Encrypt for HpkeS {
         let v = Item::from_ptr(out)?;
         Ok(unsafe { v.into_vec() })
     }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
+    }
 }
 
 impl Exporter for HpkeS {
@@ -224,6 +228,10 @@ impl Decrypt for HpkeR {
         })?;
         let v = Item::from_ptr(out)?;
         Ok(unsafe { v.into_vec() })
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 

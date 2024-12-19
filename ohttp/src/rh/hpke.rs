@@ -311,7 +311,12 @@ impl Encrypt for HpkeS {
         let mut buf = pt.to_owned();
         let mut tag = self.context.seal(&mut buf, aad)?;
         buf.append(&mut tag);
+        println!("hpke seal: {}", hex::encode(&buf));
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -529,10 +534,16 @@ impl HpkeR {
 
 impl Decrypt for HpkeR {
     fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+        println!("hpke open: {}", hex::encode(&ct));
+
         let mut buf = ct.to_owned();
         let pt_len = self.context.open(&mut buf, aad)?.len();
         buf.truncate(pt_len);
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -599,6 +610,7 @@ pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
 mod test {
     use super::{generate_key_pair, Config, HpkeR, HpkeS};
     use crate::{
+        crypto::{Decrypt, Encrypt},
         hpke::{Aead, Kem},
         init,
     };

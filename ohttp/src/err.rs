@@ -32,6 +32,9 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("the key ID was invalid")]
     KeyId,
+    #[cfg(feature = "stream")]
+    #[error("the object was not ready")]
+    NotReady,
     #[error("a field was truncated")]
     Truncated,
     #[error("the configuration was not supported")]

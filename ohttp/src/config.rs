@@ -257,6 +257,22 @@ impl KeyConfig {
             Err(Error::Unsupported)
         }
     }
+
+    #[allow(clippy::similar_names)] // for kem_id and key_id
+    pub(crate) fn decode_hpke_config(&self, r: &mut Cursor<&[u8]>) -> Res<HpkeConfig> {
+        let key_id = r.read_u8()?;
+        if key_id != self.key_id {
+            return Err(Error::KeyId);
+        }
+        let kem_id = Kem::try_from(r.read_u16::<NetworkEndian>()?)?;
+        if kem_id != self.kem {
+            return Err(Error::InvalidKem);
+        }
+        let kdf_id = Kdf::try_from(r.read_u16::<NetworkEndian>()?)?;
+        let aead_id = AeadId::try_from(r.read_u16::<NetworkEndian>()?)?;
+        let hpke_config = HpkeConfig::new(self.kem, kdf_id, aead_id);
+        Ok(hpke_config)
+    }
 }
 
 impl AsRef<Self> for KeyConfig {

@@ -5,7 +5,11 @@ use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::ChaCha20Poly1305;
 
 use super::SymKey;
-use crate::{err::Res, hpke::Aead as AeadId};
+use crate::{
+    crypto::{Decrypt, Encrypt},
+    err::Res,
+    hpke::Aead as AeadId,
+};
 
 /// All the nonces are the same length.  Exploit that.
 pub const NONCE_LEN: usize = 12;
@@ -53,6 +57,7 @@ impl AeadEngine {
 /// A switch-hitting AEAD that uses a selected primitive.
 pub struct Aead {
     mode: Mode,
+    algorithm: AeadId,
     engine: AeadEngine,
     nonce_base: [u8; NONCE_LEN],
     seq: SequenceNumber,
@@ -79,6 +84,7 @@ impl Aead {
         };
         Ok(Self {
             mode,
+            algorithm,
             engine: aead,
             nonce_base,
             seq: 0,
@@ -99,26 +105,40 @@ impl Aead {
         nonce
     }
 
-    pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
-        assert_eq!(self.mode, Mode::Encrypt);
-        // A copy for the nonce generator to write into.  But we don't use the value.
-        let nonce = self.nonce(self.seq);
-        self.seq += 1;
-        let ct = self.engine.encrypt(&nonce, Payload { msg: pt, aad })?;
-        Ok(ct)
-    }
-
-    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
-        let res = self.open_seq(aad, self.seq, ct);
-        self.seq += 1;
-        res
-    }
-
     pub fn open_seq(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
         let nonce = self.nonce(seq);
         let pt = self.engine.decrypt(&nonce, Payload { msg: ct, aad })?;
         Ok(pt)
+    }
+}
+
+impl Decrypt for Aead {
+    fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+        println!("aead open: {}", hex::encode(ct));
+        let res = self.open_seq(aad, self.seq, ct);
+        self.seq += 1;
+        res
+    }
+
+    fn alg(&self) -> AeadId {
+        self.algorithm
+    }
+}
+
+impl Encrypt for Aead {
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
+        assert_eq!(self.mode, Mode::Encrypt);
+        // A copy for the nonce generator to write into.  But we don't use the value.
+        let nonce = self.nonce(self.seq);
+        self.seq += 1;
+        let ct = self.engine.encrypt(&nonce, Payload { msg: pt, aad })?;
+        println!("aead seal: {}", hex::encode(&ct));
+        Ok(ct)
+    }
+
+    fn alg(&self) -> AeadId {
+        self.algorithm
     }
 }
 
@@ -128,6 +148,7 @@ mod test {
         super::super::{hpke::Aead as AeadId, init},
         Aead, Mode, SequenceNumber, NONCE_LEN,
     };
+    use crate::crypto::{Decrypt, Encrypt};
 
     /// Check that the first invocation of encryption matches expected values.
     /// Also check decryption of the same.

@@ -1,11 +1,15 @@
 use std::{
+    cmp::min,
     future::Future,
     io::Result as IoResult,
     pin::{pin, Pin},
     task::{Context, Poll},
 };
 
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, TryStream, TryStreamExt};
+use futures::{
+    io::{ReadHalf, WriteHalf},
+    AsyncRead, AsyncReadExt, AsyncWrite, TryStream, TryStreamExt,
+};
 use pin_project::pin_project;
 
 fn noop_context() -> Context<'static> {
@@ -201,5 +205,66 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Stutter<S> {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
         Self::stutter(self, cx, AsyncWrite::poll_close)
+    }
+}
+
+/// A Cursor implementation that has separate read and write cursors.
+///
+/// This allows tests to create paired read and write objects,
+/// where writes to one can be read by the other.
+///
+/// This relies on the implementation of `AyncReadExt::split` to provide
+/// any locking and concurrency, rather than implementing it.
+#[derive(Default)]
+#[pin_project]
+pub struct Pipe {
+    buf: Vec<u8>,
+    r: usize,
+    w: usize,
+}
+
+impl Pipe {
+    #[must_use]
+    pub fn new() -> (ReadHalf<Self>, WriteHalf<Self>) {
+        AsyncReadExt::split(Self::default())
+    }
+}
+
+impl AsyncRead for Pipe {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        let amnt = min(buf.len(), self.buf.len() - self.r);
+        buf[..amnt].copy_from_slice(&self.buf[self.r..self.r + amnt]);
+        self.r += amnt;
+        Poll::Ready(Ok(amnt))
+    }
+}
+
+impl AsyncWrite for Pipe {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        mut buf: &[u8],
+    ) -> Poll<IoResult<usize>> {
+        if self.w < self.buf.len() {
+            let overlap = min(buf.len() - self.w, self.buf.len());
+            let range = self.w..(self.w + overlap);
+            self.buf[range].copy_from_slice(&buf[..overlap]);
+            buf = &buf[overlap..];
+        }
+        self.buf.extend_from_slice(buf);
+        self.w += buf.len();
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Poll::Ready(Ok(()))
     }
 }
