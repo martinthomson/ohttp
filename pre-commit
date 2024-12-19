@@ -63,7 +63,7 @@ fi
 check() {
     msg="$1"
     shift
-    if ! echo "$@"; then
+    if ! "$@"; then
         echo "${msg}: Failed command:"
         echo "    ${@@Q}"
         exit 1

@@ -311,7 +311,6 @@ impl Encrypt for HpkeS {
         let mut buf = pt.to_owned();
         let mut tag = self.context.seal(&mut buf, aad)?;
         buf.append(&mut tag);
-        println!("hpke seal: {}", hex::encode(&buf));
         Ok(buf)
     }
 
@@ -534,8 +533,6 @@ impl HpkeR {
 
 impl Decrypt for HpkeR {
     fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
-        println!("hpke open: {}", hex::encode(&ct));
-
         let mut buf = ct.to_owned();
         let pt_len = self.context.open(&mut buf, aad)?.len();
         buf.truncate(pt_len);

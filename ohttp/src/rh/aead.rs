@@ -115,7 +115,6 @@ impl Aead {
 
 impl Decrypt for Aead {
     fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
-        println!("aead open: {}", hex::encode(ct));
         let res = self.open_seq(aad, self.seq, ct);
         self.seq += 1;
         res
@@ -133,7 +132,6 @@ impl Encrypt for Aead {
         let nonce = self.nonce(self.seq);
         self.seq += 1;
         let ct = self.engine.encrypt(&nonce, Payload { msg: pt, aad })?;
-        println!("aead seal: {}", hex::encode(&ct));
         Ok(ct)
     }
 

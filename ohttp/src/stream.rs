@@ -29,6 +29,14 @@ const MAX_CHUNK_PLAINTEXT: usize = 1 << 14;
 const CHUNK_AAD: &[u8] = b"";
 const FINAL_CHUNK_AAD: &[u8] = b"final";
 
+#[allow(clippy::unnecessary_wraps)]
+fn some_error<T, E>(e: E) -> Option<Poll<IoResult<T>>>
+where
+    Error: From<E>,
+{
+    Some(Poll::Ready(Err(IoError::other(Error::from(e)))))
+}
+
 #[pin_project(project = ChunkWriterProjection)]
 struct ChunkWriter<D, E> {
     #[pin]
@@ -52,12 +60,12 @@ impl<D, E> ChunkWriter<D, E> {
     }
 }
 
-impl<D: AsyncWrite, E: Encrypt> ChunkWriter<D, E> {
+impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
     /// Flush our buffer.
     /// Returns `Some` if the flush blocks or is unsuccessful.
     /// If that contains `Ready`, it does so only when there is an error.
     fn flush(
-        this: &mut ChunkWriterProjection<'_, D, E>,
+        this: &mut ChunkWriterProjection<'_, D, C>,
         cx: &mut Context<'_>,
     ) -> Option<Poll<IoError>> {
         while !this.buf.is_empty() {
@@ -87,7 +95,7 @@ impl<D: AsyncWrite, E: Encrypt> ChunkWriter<D, E> {
     }
 
     fn write_chunk(
-        this: &mut ChunkWriterProjection<'_, D, E>,
+        this: &mut ChunkWriterProjection<'_, D, C>,
         cx: &mut Context<'_>,
         input: &[u8],
         last: bool,
@@ -102,7 +110,6 @@ impl<D: AsyncWrite, E: Encrypt> ChunkWriter<D, E> {
 
         let mut len_buf = [0; 8];
         let len = Self::write_len(&mut len_buf[..], len);
-        println!("chunk: {}", hex::encode(len));
         let w = match this.dst.as_mut().poll_write(cx, len) {
             Poll::Pending => 0,
             Poll::Ready(Ok(w)) => w,
@@ -127,7 +134,7 @@ impl<D: AsyncWrite, E: Encrypt> ChunkWriter<D, E> {
     }
 }
 
-impl<D: AsyncWrite, E: Encrypt> AsyncWrite for ChunkWriter<D, E> {
+impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -263,65 +270,21 @@ impl ChunkReader {
         }
     }
 
-    fn read_length<S: AsyncRead, A: Decrypt>(
-        &mut self,
+    fn read_fixed<S: AsyncRead>(
         mut src: Pin<&mut S>,
         cx: &mut Context<'_>,
-        aead: &mut A,
+        buf: &mut [u8],
+        offset: &mut usize,
     ) -> Option<Poll<IoResult<usize>>> {
-        // Read the first byte.
-        let Self::Length { len, offset } = self else {
-            return None;
-        };
-
-        if *offset == 0 {
-            match src.as_mut().poll_read(cx, &mut len[..1]) {
-                Poll::Pending => return Some(Poll::Pending),
-                Poll::Ready(Ok(0)) => {
-                    return Some(Poll::Ready(Err(IoError::other(Error::Truncated))));
-                }
-                Poll::Ready(Ok(1)) => {}
-                Poll::Ready(Ok(_)) => unreachable!(),
-                e @ Poll::Ready(Err(_)) => return Some(e),
-            }
-        }
-
-        let form = len[0] >> 6;
-        if form == 0 {
-            *self = Self::data(usize::from(len[0]));
-            return None;
-        }
-        let v = mem::replace(&mut len[0], 0) & 0x3f;
-        let i = match form {
-            1 => 6,
-            2 => 4,
-            3 => 0,
-            _ => unreachable!(),
-        };
-        len[i] = v;
-        *offset = i + 1;
-
-        while *offset < len.len() {
+        while *offset < buf.len() {
             // Read any remaining bytes of the length.
-            match src.as_mut().poll_read(cx, &mut len[*offset..]) {
+            match src.as_mut().poll_read(cx, &mut buf[*offset..]) {
                 Poll::Pending => return Some(Poll::Pending),
                 Poll::Ready(Ok(0)) => {
-                    return Some(Poll::Ready(Err(IoError::other(Error::Truncated))));
+                    return some_error(Error::Truncated);
                 }
                 Poll::Ready(Ok(r)) => {
                     *offset += r;
-                    if *offset < 8 {
-                        continue;
-                    }
-                    let remaining = match usize::try_from(u64::from_be_bytes(*len)) {
-                        Ok(remaining) => remaining,
-                        Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
-                    };
-                    if remaining > MAX_CHUNK_PLAINTEXT + aead.alg().n_t() {
-                        return Some(Poll::Ready(Err(IoError::other(Error::ChunkTooLarge))));
-                    }
-                    *self = Self::data(remaining);
-                    return None;
                 }
                 e @ Poll::Ready(Err(_)) => return Some(e),
             }
@@ -329,12 +292,76 @@ impl ChunkReader {
         None
     }
 
-    /// Optional optimization that reads a single chunk into the output buffer.
-    fn read_into_output<S: AsyncRead, A: Decrypt>(
+    fn read_length0<S: AsyncRead>(
         &mut self,
         mut src: Pin<&mut S>,
         cx: &mut Context<'_>,
-        aead: &mut A,
+    ) -> Option<Poll<IoResult<usize>>> {
+        let Self::Length { len, offset } = self else {
+            return None;
+        };
+
+        let res = Self::read_fixed(src.as_mut(), cx, &mut len[..1], offset);
+        if res.is_some() {
+            return res;
+        }
+
+        let form = len[0] >> 6;
+        if form == 0 {
+            *self = Self::data(usize::from(len[0]));
+        } else {
+            let v = mem::replace(&mut len[0], 0) & 0x3f;
+            let i = match form {
+                1 => 6,
+                2 => 4,
+                3 => 0,
+                _ => unreachable!(),
+            };
+            len[i] = v;
+            *offset = i + 1;
+        }
+        None
+    }
+
+    fn read_length<S: AsyncRead, C: Decrypt>(
+        &mut self,
+        mut src: Pin<&mut S>,
+        cx: &mut Context<'_>,
+        aead: &mut C,
+    ) -> Option<Poll<IoResult<usize>>> {
+        // Read the first byte.
+        let res = self.read_length0(src.as_mut(), cx);
+        if res.is_some() {
+            return res;
+        }
+
+        let Self::Length { len, offset } = self else {
+            return None;
+        };
+
+        let res = Self::read_fixed(src.as_mut(), cx, &mut len[..], offset);
+        if res.is_some() {
+            return res;
+        }
+
+        let remaining = match usize::try_from(u64::from_be_bytes(*len)) {
+            Ok(remaining) => remaining,
+            Err(e) => return some_error(e),
+        };
+        if remaining > MAX_CHUNK_PLAINTEXT + aead.alg().n_t() {
+            return some_error(Error::ChunkTooLarge);
+        }
+
+        *self = Self::data(remaining);
+        None
+    }
+
+    /// Optional optimization that reads a single chunk into the output buffer.
+    fn read_into_output<S: AsyncRead, C: Decrypt>(
+        &mut self,
+        mut src: Pin<&mut S>,
+        cx: &mut Context<'_>,
+        aead: &mut C,
         output: &mut [u8],
     ) -> Option<Poll<IoResult<usize>>> {
         let Self::Data {
@@ -352,12 +379,12 @@ impl ChunkReader {
 
         match src.as_mut().poll_read(cx, &mut output[..*length]) {
             Poll::Pending => Some(Poll::Pending),
-            Poll::Ready(Ok(0)) => Some(Poll::Ready(Err(IoError::other(Error::Truncated)))),
+            Poll::Ready(Ok(0)) => some_error(Error::Truncated),
             Poll::Ready(Ok(r)) => {
                 if r == *length {
                     let pt = match aead.open(CHUNK_AAD, &output[..r]) {
                         Ok(pt) => pt,
-                        Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
+                        Err(e) => return some_error(e),
                     };
                     output[..pt.len()].copy_from_slice(&pt);
                     *self = Self::length();
@@ -374,11 +401,11 @@ impl ChunkReader {
         }
     }
 
-    fn read<S: AsyncRead, A: Decrypt>(
+    fn read<S: AsyncRead, C: Decrypt>(
         &mut self,
         mut src: Pin<&mut S>,
         cx: &mut Context<'_>,
-        cipher: &mut A,
+        cipher: &mut C,
         output: &mut [u8],
     ) -> Poll<IoResult<usize>> {
         while !matches!(self, Self::Done) {
@@ -523,17 +550,9 @@ impl<S: AsyncRead> ServerRequest<S> {
             return None;
         };
 
-        while *read < buf.len() {
-            match this.src.as_mut().poll_read(cx, &mut buf[*read..]) {
-                Poll::Pending => return Some(Poll::Pending),
-                Poll::Ready(Ok(0)) => {
-                    return Some(Poll::Ready(Err(IoError::other(Error::Truncated))))
-                }
-                Poll::Ready(Ok(len)) => {
-                    *read += len;
-                }
-                e @ Poll::Ready(Err(_)) => return Some(e),
-            }
+        let res = ChunkReader::read_fixed(this.src.as_mut(), cx, &mut buf[..], read);
+        if res.is_some() {
+            return res;
         }
 
         let config = match this
@@ -541,11 +560,11 @@ impl<S: AsyncRead> ServerRequest<S> {
             .decode_hpke_config(&mut Cursor::new(&buf[..]))
         {
             Ok(cfg) => cfg,
-            Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
+            Err(e) => return some_error(e),
         };
         let info = match build_info(INFO_REQUEST, this.key_config.key_id, config) {
             Ok(info) => info,
-            Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
+            Err(e) => return some_error(e),
         };
         this.enc.resize(config.kem().n_enc(), 0);
 
@@ -565,17 +584,9 @@ impl<S: AsyncRead> ServerRequest<S> {
             return None;
         };
 
-        while *read < this.enc.len() {
-            match this.src.as_mut().poll_read(cx, &mut this.enc[*read..]) {
-                Poll::Pending => return Some(Poll::Pending),
-                Poll::Ready(Ok(0)) => {
-                    return Some(Poll::Ready(Err(IoError::other(Error::Truncated))))
-                }
-                Poll::Ready(Ok(len)) => {
-                    *read += len;
-                }
-                e @ Poll::Ready(Err(_)) => return Some(e),
-            }
+        let res = ChunkReader::read_fixed(this.src.as_mut(), cx, &mut this.enc[..], read);
+        if res.is_some() {
+            return res;
         }
 
         let hpke = match HpkeR::new(
@@ -586,7 +597,7 @@ impl<S: AsyncRead> ServerRequest<S> {
             info,
         ) {
             Ok(hpke) => hpke,
-            Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
+            Err(e) => return some_error(e),
         };
 
         *this.state = ServerRequestState::Body {
@@ -679,31 +690,16 @@ impl<S: AsyncRead> ClientResponse<S> {
         else {
             return None;
         };
-        loop {
-            match this.src.as_mut().poll_read(cx, &mut nonce[*read..]) {
-                Poll::Pending => return Some(Poll::Pending),
-                Poll::Ready(Ok(0)) => {
-                    return Some(Poll::Ready(Err(IoError::other(Error::Truncated))))
-                }
-                Poll::Ready(Ok(len)) => {
-                    *read += len;
-                    if *read == entropy(*this.config) {
-                        break;
-                    }
-                }
-                e @ Poll::Ready(Err(_)) => return Some(e),
-            }
+
+        let nonce = &mut nonce[..entropy(*this.config)];
+        let res = ChunkReader::read_fixed(this.src.as_mut(), cx, nonce, read);
+        if res.is_some() {
+            return res;
         }
 
-        let aead = match make_aead(
-            Mode::Decrypt,
-            *this.config,
-            secret,
-            enc,
-            &nonce[..entropy(*this.config)],
-        ) {
+        let aead = match make_aead(Mode::Decrypt, *this.config, secret, enc, nonce) {
             Ok(aead) => aead,
-            Err(e) => return Some(Poll::Ready(Err(IoError::other(e)))),
+            Err(e) => return some_error(e),
         };
 
         *this.state = ClientResponseState::Body {
@@ -753,6 +749,7 @@ mod test {
         let encoded_config = server.config().encode().unwrap();
         trace!("Config: {}", hex::encode(&encoded_config));
 
+        // The client sends a request.
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (mut request_read, request_write) = Pipe::new();
         let mut client_request = client.encapsulate_stream(request_write).unwrap();
@@ -763,9 +760,11 @@ mod test {
         let enc_request = request_read.sync_read_to_end();
         trace!("Encapsulated Request: {}", hex::encode(&enc_request));
 
+        // The server receives a request.
         let mut server_request = server.decapsulate_stream(&enc_request[..]);
         assert_eq!(server_request.sync_read_to_end(), REQUEST);
 
+        // The server sends a response.
         let (mut response_read, response_write) = Pipe::new();
         let mut server_response = server_request.response(response_write).unwrap();
         server_response.write_all(RESPONSE).sync_resolve().unwrap();
@@ -774,8 +773,8 @@ mod test {
         let enc_response = response_read.sync_read_to_end();
         trace!("Encapsulated Response: {}", hex::encode(&enc_response));
 
+        // The client receives a response.
         let mut client_response = client_request.response(&enc_response[..]).unwrap();
-
         let response_buf = client_response.sync_read_to_end();
         assert_eq!(response_buf, RESPONSE);
         trace!("Response: {}", hex::encode(response_buf));
