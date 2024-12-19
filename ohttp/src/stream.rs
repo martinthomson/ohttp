@@ -11,8 +11,8 @@ use std::{
 use futures::{AsyncRead, AsyncWrite};
 
 use crate::{
-    build_info, entropy, err::Res, export_secret, make_aead, Aead, Error, HpkeConfig, HpkeR, HpkeS,
-    KeyConfig, KeyId, Mode, PublicKey, SymKey, REQUEST_HEADER_LEN,
+    build_info, crypto::Encrypt, entropy, err::Res, export_secret, make_aead, Aead, Error,
+    HpkeConfig, HpkeR, HpkeS, KeyConfig, KeyId, Mode, PublicKey, SymKey, REQUEST_HEADER_LEN,
 };
 
 /// The info string for a chunked request.

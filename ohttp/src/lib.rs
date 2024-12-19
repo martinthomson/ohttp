@@ -8,6 +8,7 @@
 compile_error!("features \"nss\" and \"rust-hpke\" are mutually incompatible");
 
 mod config;
+mod crypto;
 mod err;
 pub mod hpke;
 #[cfg(feature = "nss")]
@@ -27,6 +28,7 @@ use std::{
 };
 
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use crypto::{Decrypt, Encrypt};
 use log::trace;
 
 #[cfg(feature = "nss")]

@@ -17,6 +17,7 @@ use rust_hpke::{
 
 use super::SymKey;
 use crate::{
+    crypto::{Decrypt, Encrypt},
     hpke::{Aead, Kdf, Kem},
     Error, Res,
 };
@@ -303,8 +304,10 @@ impl HpkeS {
     pub fn enc(&self) -> Res<Vec<u8>> {
         Ok(self.enc.clone())
     }
+}
 
-    pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
+impl Encrypt for HpkeS {
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
         let mut buf = pt.to_owned();
         let mut tag = self.context.seal(&mut buf, aad)?;
         buf.append(&mut tag);
@@ -522,8 +525,10 @@ impl HpkeR {
             ),
         })
     }
+}
 
-    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+impl Decrypt for HpkeR {
+    fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
         let mut buf = ct.to_owned();
         let pt_len = self.context.open(&mut buf, aad)?.len();
         buf.truncate(pt_len);
