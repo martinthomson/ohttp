@@ -30,11 +30,11 @@ const CHUNK_AAD: &[u8] = b"";
 const FINAL_CHUNK_AAD: &[u8] = b"final";
 
 #[allow(clippy::unnecessary_wraps)]
-fn some_error<T, E>(e: E) -> Option<Poll<IoResult<T>>>
+fn ioerror<T, E>(e: E) -> Poll<IoResult<T>>
 where
     Error: From<E>,
 {
-    Some(Poll::Ready(Err(IoError::other(Error::from(e)))))
+    Poll::Ready(Err(IoError::other(Error::from(e))))
 }
 
 #[pin_project(project = ChunkWriterProjection)]
@@ -43,6 +43,7 @@ struct ChunkWriter<D, E> {
     dst: D,
     cipher: E,
     buf: Vec<u8>,
+    closed: bool,
 }
 
 impl<D, E> ChunkWriter<D, E> {
@@ -141,6 +142,10 @@ impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
         input: &[u8],
     ) -> Poll<IoResult<usize>> {
         let mut this = self.project();
+        if *this.closed {
+            return ioerror(Error::WriteAfterClose);
+        }
+
         // We have buffered data, so dump it into the output directly.
         if let Some(value) = Self::flush(&mut this, cx) {
             return value.map(Err);
@@ -162,7 +167,26 @@ impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
-        Self::write_chunk(&mut self.project(), cx, &[], true).map(|p| p.map(|_| ()))
+        let mut this = self.project();
+        if let Some(value) = Self::flush(&mut this, cx) {
+            return value.map(Err);
+        }
+
+        if !*this.closed {
+            *this.closed = true;
+            if let Poll::Ready(Err(e)) = Self::write_chunk(&mut this, cx, &[], true) {
+                return Poll::Ready(Err(e));
+            }
+            // `write_chunk` might have buffered some data after being blocked.
+            // We have to try to write that out here.
+            // If the write was partly successful, the underlying sink (`dst`)
+            // won't be responsible for waking `cx`.
+            // `flush` forces that to take responsibility for waking.
+            if let Some(value) = Self::flush(&mut this, cx) {
+                return value.map(Err);
+            }
+        }
+        this.dst.as_mut().poll_close(cx)
     }
 }
 
@@ -189,6 +213,7 @@ impl<D> ClientRequest<D> {
                 dst,
                 cipher: hpke,
                 buf: header,
+                closed: false,
             },
         })
     }
@@ -281,7 +306,7 @@ impl ChunkReader {
             match src.as_mut().poll_read(cx, &mut buf[*offset..]) {
                 Poll::Pending => return Some(Poll::Pending),
                 Poll::Ready(Ok(0)) => {
-                    return some_error(Error::Truncated);
+                    return Some(ioerror(Error::Truncated));
                 }
                 Poll::Ready(Ok(r)) => {
                     *offset += r;
@@ -346,10 +371,10 @@ impl ChunkReader {
 
         let remaining = match usize::try_from(u64::from_be_bytes(*len)) {
             Ok(remaining) => remaining,
-            Err(e) => return some_error(e),
+            Err(e) => return Some(ioerror(e)),
         };
         if remaining > MAX_CHUNK_PLAINTEXT + aead.alg().n_t() {
-            return some_error(Error::ChunkTooLarge);
+            return Some(ioerror(Error::ChunkTooLarge));
         }
 
         *self = Self::data(remaining);
@@ -379,12 +404,12 @@ impl ChunkReader {
 
         match src.as_mut().poll_read(cx, &mut output[..*length]) {
             Poll::Pending => Some(Poll::Pending),
-            Poll::Ready(Ok(0)) => some_error(Error::Truncated),
+            Poll::Ready(Ok(0)) => Some(ioerror(Error::Truncated)),
             Poll::Ready(Ok(r)) => {
                 if r == *length {
                     let pt = match aead.open(CHUNK_AAD, &output[..r]) {
                         Ok(pt) => pt,
-                        Err(e) => return some_error(e),
+                        Err(e) => return Some(ioerror(e)),
                     };
                     output[..pt.len()].copy_from_slice(&pt);
                     *self = Self::length();
@@ -444,7 +469,7 @@ impl ChunkReader {
                     if last {
                         buf.truncate(*offset);
                     } else {
-                        return Poll::Ready(Err(IoError::other(Error::Truncated)));
+                        return ioerror(Error::Truncated);
                     }
                 }
                 Poll::Ready(Ok(r)) => {
@@ -536,6 +561,7 @@ impl<S> ServerRequest<S> {
                 dst,
                 cipher: aead,
                 buf: response_nonce,
+                closed: false,
             },
         })
     }
@@ -560,11 +586,11 @@ impl<S: AsyncRead> ServerRequest<S> {
             .decode_hpke_config(&mut Cursor::new(&buf[..]))
         {
             Ok(cfg) => cfg,
-            Err(e) => return some_error(e),
+            Err(e) => return Some(ioerror(e)),
         };
         let info = match build_info(INFO_REQUEST, this.key_config.key_id, config) {
             Ok(info) => info,
-            Err(e) => return some_error(e),
+            Err(e) => return Some(ioerror(e)),
         };
         this.enc.resize(config.kem().n_enc(), 0);
 
@@ -597,7 +623,7 @@ impl<S: AsyncRead> ServerRequest<S> {
             info,
         ) {
             Ok(hpke) => hpke,
-            Err(e) => return some_error(e),
+            Err(e) => return Some(ioerror(e)),
         };
 
         *this.state = ServerRequestState::Body {
@@ -699,7 +725,7 @@ impl<S: AsyncRead> ClientResponse<S> {
 
         let aead = match make_aead(Mode::Decrypt, *this.config, secret, enc, nonce) {
             Ok(aead) => aead,
-            Err(e) => return some_error(e),
+            Err(e) => return Some(ioerror(e)),
         };
 
         *this.state = ClientResponseState::Body {
@@ -733,7 +759,7 @@ impl<S: AsyncRead> AsyncRead for ClientResponse<S> {
 mod test {
     use futures::AsyncWriteExt;
     use log::trace;
-    use sync_async::{Pipe, SyncRead, SyncResolve};
+    use sync_async::{Dribble, Pipe, Stutter, SyncRead, SyncResolve};
 
     use crate::{
         test::{init, make_config, REQUEST, RESPONSE},
@@ -775,6 +801,51 @@ mod test {
 
         // The client receives a response.
         let mut client_response = client_request.response(&enc_response[..]).unwrap();
+        let response_buf = client_response.sync_read_to_end();
+        assert_eq!(response_buf, RESPONSE);
+        trace!("Response: {}", hex::encode(response_buf));
+    }
+
+    /// Run the `request_response` test, but do it with streams that are one byte apiece.
+    #[test]
+    fn dribble() {
+        init();
+
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
+
+        // The client sends a request.
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let request_write = Stutter::new(Dribble::new(request_write));
+        let mut client_request = client.encapsulate_stream(request_write).unwrap();
+        client_request.write_all(REQUEST).sync_resolve().unwrap();
+        client_request.close().sync_resolve().unwrap();
+
+        trace!("Request: {}", hex::encode(REQUEST));
+        let enc_request = request_read.sync_read_to_end();
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
+
+        // The server receives a request.
+        let enc_req_stream = Stutter::new(Dribble::new(&enc_request[..]));
+        let mut server_request = server.decapsulate_stream(enc_req_stream);
+        assert_eq!(server_request.sync_read_to_end(), REQUEST);
+
+        // The server sends a response.
+        let (mut response_read, response_write) = Pipe::new();
+        let response_write = Stutter::new(Dribble::new(response_write));
+        let mut server_response = server_request.response(response_write).unwrap();
+        server_response.write_all(RESPONSE).sync_resolve().unwrap();
+        server_response.close().sync_resolve().unwrap();
+
+        let enc_response = response_read.sync_read_to_end();
+        trace!("Encapsulated Response: {}", hex::encode(&enc_response));
+
+        // The client receives a response.
+        let enc_resp_stream = Stutter::new(Dribble::new(&enc_response[..]));
+        let mut client_response = client_request.response(enc_resp_stream).unwrap();
         let response_buf = client_response.sync_read_to_end();
         assert_eq!(response_buf, RESPONSE);
         trace!("Response: {}", hex::encode(response_buf));

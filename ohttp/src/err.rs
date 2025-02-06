@@ -35,12 +35,15 @@ pub enum Error {
     #[cfg(feature = "stream")]
     #[error("the object was not ready")]
     NotReady,
+    #[error("the configuration contained too many symmetric suites")]
+    TooManySymmetricSuites,
     #[error("a field was truncated")]
     Truncated,
     #[error("the configuration was not supported")]
     Unsupported,
-    #[error("the configuration contained too many symmetric suites")]
-    TooManySymmetricSuites,
+    #[cfg(feature = "stream")]
+    #[error("writes are not supported after closing")]
+    WriteAfterClose,
 }
 
 impl From<std::num::TryFromIntError> for Error {

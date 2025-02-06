@@ -129,11 +129,12 @@ impl<S> Dribble<S> {
 
 impl<S: AsyncRead + Unpin> AsyncRead for Dribble<S> {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<IoResult<usize>> {
-        pin!(&mut self.s).poll_read(cx, &mut buf[..1])
+        let mut this = self.project();
+        this.s.as_mut().poll_read(cx, &mut buf[..1])
     }
 }
 
@@ -141,6 +142,86 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Dribble<S> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
         let mut this = self.project();
         this.s.as_mut().poll_write(cx, &buf[..1])
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        let mut this = self.project();
+        this.s.as_mut().poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        let mut this = self.project();
+        this.s.as_mut().poll_close(cx)
+    }
+}
+
+#[pin_project(project = SplitAtProjection)]
+pub struct SplitAt<S> {
+    #[pin]
+    s: S,
+    remaining: Option<usize>,
+}
+
+impl<S> SplitAt<S> {
+    /// Split the stream at the selected `offset`.
+    /// Read or write calls will stop at the indicated offset,
+    /// with a single `Poll::Pending` return at that point,
+    /// after which all operations proceed normally.
+    pub fn new(s: S, offset: usize) -> Self {
+        Self {
+            s,
+            remaining: Some(offset),
+        }
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for SplitAt<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        let mut this = self.project();
+        if let Some(r) = this.remaining {
+            let remaining = *r;
+            if remaining == 0 {
+                *this.remaining = None;
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+
+            let cut = min(remaining, buf.len());
+            let res = this.s.as_mut().poll_read(cx, &mut buf[..cut]);
+            if let Poll::Ready(Ok(count)) = res {
+                *this.remaining = Some(remaining - count);
+            }
+            res
+        } else {
+            this.s.as_mut().poll_read(cx, buf)
+        }
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for SplitAt<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
+        let mut this = self.project();
+        if let Some(r) = this.remaining {
+            let remaining = *r;
+            if remaining == 0 {
+                *this.remaining = None;
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+
+            let cut = min(remaining, buf.len());
+            let res = this.s.as_mut().poll_write(cx, &buf[..cut]);
+            if let Poll::Ready(Ok(count)) = res {
+                *this.remaining = Some(remaining - count);
+            }
+            res
+        } else {
+            this.s.as_mut().poll_write(cx, buf)
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {

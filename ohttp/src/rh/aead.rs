@@ -142,11 +142,12 @@ impl Encrypt for Aead {
 
 #[cfg(test)]
 mod test {
-    use super::{
-        super::super::{hpke::Aead as AeadId, init},
-        Aead, Mode, SequenceNumber, NONCE_LEN,
+    use super::SequenceNumber;
+    use crate::{
+        crypto::{Decrypt, Encrypt},
+        hpke::Aead as AeadId,
+        init, Aead, Mode, NONCE_LEN,
     };
-    use crate::crypto::{Decrypt, Encrypt};
 
     /// Check that the first invocation of encryption matches expected values.
     /// Also check decryption of the same.
@@ -277,5 +278,27 @@ mod test {
         check0(ALG, KEY, NONCE, AAD, PT, CT);
         // Now use the real nonce and sequence number from the example.
         decrypt(ALG, KEY, NONCE_BASE, 654_360_564, AAD, PT, CT);
+    }
+
+    #[test]
+    fn seal_open_many() {
+        const PT: &[u8] = b"abc";
+        const ALG: AeadId = AeadId::Aes128Gcm;
+        const KEY: &[u8] = &[0; 16];
+        const NONCE: [u8; NONCE_LEN] = [0; NONCE_LEN];
+
+        init();
+        let k = Aead::import_key(ALG, KEY).unwrap();
+
+        let mut e = Aead::new(Mode::Encrypt, ALG, &k, NONCE).unwrap();
+        let mut d = Aead::new(Mode::Decrypt, ALG, &k, NONCE).unwrap();
+
+        for i in 1..5 {
+            let ct = e.seal(&[], PT).unwrap();
+            println!("ct{i}: {}", hex::encode(&ct));
+
+            let pt = d.open(&[], &ct).unwrap();
+            assert_eq!(pt, PT);
+        }
     }
 }
