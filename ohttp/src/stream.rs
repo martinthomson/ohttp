@@ -757,7 +757,7 @@ impl<S: AsyncRead> AsyncRead for ClientResponse<S> {
 
 #[cfg(test)]
 mod test {
-    use futures::AsyncWriteExt;
+    use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use log::trace;
     use sync_async::{Dribble, Pipe, Stutter, SyncRead, SyncResolve};
 
@@ -806,9 +806,10 @@ mod test {
         trace!("Response: {}", hex::encode(response_buf));
     }
 
-    /// Run the `request_response` test, but do it with streams that are one byte apiece.
+    /// Run the `request_response` test, but do it with streams that are one byte apiece
+    /// on the output side.
     #[test]
-    fn dribble() {
+    fn dribble_out() {
         init();
 
         let server_config = make_config();
@@ -849,5 +850,62 @@ mod test {
         let response_buf = client_response.sync_read_to_end();
         assert_eq!(response_buf, RESPONSE);
         trace!("Response: {}", hex::encode(response_buf));
+    }
+
+    /// Write something out, but first wrap it in `Stutter` and `Dribble`.
+    #[must_use]
+    fn write_sd<S: AsyncWrite + AsyncWriteExt + Unpin>(s: S, data: &[u8]) -> S {
+        let mut s = Stutter::new(Dribble::new(s));
+        s.write_all(data).sync_resolve().unwrap();
+        s.close().sync_resolve().unwrap();
+        s.unwrap().unwrap()
+    }
+    /// Read something in, but first wrap it in `Stutter` and `Dribble`.
+    #[must_use]
+    fn read_sd<S: AsyncRead + AsyncReadExt + Unpin>(s: S) -> (Vec<u8>, S) {
+        let mut s = Stutter::new(Dribble::new(s));
+        (s.sync_read_to_end(), s.unwrap().unwrap())
+    }
+
+    /// Run the `request_response` test, but do it with streams that are one byte apiece
+    /// on the input side.
+    #[test]
+    fn dribble_in() {
+        init();
+
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
+
+        // The client sends a request.
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let client_request = client.encapsulate_stream(request_write).unwrap();
+        let client_request = write_sd(client_request, REQUEST);
+
+        trace!("Request: {}", hex::encode(REQUEST));
+        let enc_request = request_read.sync_read_to_end();
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
+
+        // The server receives a request.
+        let enc_req_stream = &enc_request[..];
+        let server_request = server.decapsulate_stream(enc_req_stream);
+        let (request_data, server_request) = read_sd(server_request);
+        assert_eq!(request_data, REQUEST);
+
+        // The server sends a response.
+        let (mut response_read, response_write) = Pipe::new();
+        let server_response = server_request.response(response_write).unwrap();
+        _ = write_sd(server_response, RESPONSE);
+
+        let enc_response = response_read.sync_read_to_end();
+        trace!("Encapsulated Response: {}", hex::encode(&enc_response));
+
+        // The client receives a response.
+        let client_response = client_request.response(&enc_response[..]).unwrap();
+        let (response_data, _) = read_sd(client_response);
+        assert_eq!(response_data, RESPONSE);
+        trace!("Response: {}", hex::encode(response_data));
     }
 }

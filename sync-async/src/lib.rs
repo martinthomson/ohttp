@@ -125,6 +125,10 @@ impl<S> Dribble<S> {
     pub fn new(s: S) -> Self {
         Self { s }
     }
+
+    pub fn unwrap(self) -> S {
+        self.s
+    }
 }
 
 impl<S: AsyncRead + Unpin> AsyncRead for Dribble<S> {
@@ -172,6 +176,10 @@ impl<S> SplitAt<S> {
             s,
             remaining: Some(offset),
         }
+    }
+
+    pub fn unwrap(self) -> S {
+        self.s
     }
 }
 
@@ -245,6 +253,10 @@ pub struct Stutter<S> {
 impl<S> Stutter<S> {
     pub fn new(s: S) -> Self {
         Self { stall: false, s }
+    }
+
+    pub fn unwrap(self) -> S {
+        self.s
     }
 
     fn stutter<T, F>(self: Pin<&mut Self>, cx: &mut Context<'_>, f: F) -> Poll<T>
