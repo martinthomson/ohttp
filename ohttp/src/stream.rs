@@ -63,15 +63,19 @@ impl<D, E> ChunkWriter<D, E> {
 
 impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
     /// Flush our buffer.
-    /// Returns `Some` if the flush blocks or is unsuccessful.
-    /// If that contains `Ready`, it does so only when there is an error.
+    /// Returns `Poll::Pending` when blocked,
+    /// `Poll::Ready(Ok(()))` when flushed,
+    /// and `Poll::Ready(Err(..))` when it encounters an error.
     fn flush(
         this: &mut ChunkWriterProjection<'_, D, C>,
         cx: &mut Context<'_>,
-    ) -> Option<Poll<IoError>> {
-        while !this.buf.is_empty() {
+    ) -> Poll<Result<(), IoError>> {
+        if this.buf.is_empty() {
+            return Poll::Ready(Ok(()));
+        }
+        loop {
             match this.dst.as_mut().poll_write(cx, &this.buf[..]) {
-                Poll::Pending => return Some(Poll::Pending),
+                Poll::Pending => return Poll::Pending,
                 Poll::Ready(Ok(len)) => {
                     if len < this.buf.len() {
                         // We've written something to the underlying writer,
@@ -87,12 +91,12 @@ impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
                         *this.buf = this.buf.split_off(len);
                     } else {
                         this.buf.clear();
+                        return Poll::Ready(Ok(()));
                     }
                 }
-                Poll::Ready(Err(e)) => return Some(Poll::Ready(e)),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             }
         }
-        None
     }
 
     fn write_chunk(
@@ -100,7 +104,7 @@ impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
         cx: &mut Context<'_>,
         input: &[u8],
         last: bool,
-    ) -> Poll<IoResult<usize>> {
+    ) -> IoResult<usize> {
         let aad = if last { FINAL_CHUNK_AAD } else { CHUNK_AAD };
         let mut ct = this.cipher.seal(aad, input).map_err(IoError::other)?;
         let (len, written) = if last {
@@ -114,7 +118,7 @@ impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
         let w = match this.dst.as_mut().poll_write(cx, len) {
             Poll::Pending => 0,
             Poll::Ready(Ok(w)) => w,
-            e @ Poll::Ready(Err(_)) => return e,
+            Poll::Ready(e @ Err(_)) => return e,
         };
 
         if w < len.len() {
@@ -128,10 +132,10 @@ impl<D: AsyncWrite, C: Encrypt> ChunkWriter<D, C> {
                 Poll::Ready(Ok(w)) => {
                     *this.buf = ct.split_off(w);
                 }
-                e @ Poll::Ready(Err(_)) => return e,
+                Poll::Ready(e @ Err(_)) => return e,
             }
         }
-        Poll::Ready(Ok(written))
+        Ok(written)
     }
 }
 
@@ -147,20 +151,21 @@ impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
         }
 
         // We have buffered data, so dump it into the output directly.
-        if let Some(value) = Self::flush(&mut this, cx) {
-            return value.map(Err);
+        let flushed = Self::flush(&mut this, cx);
+        if matches!(flushed, Poll::Pending | Poll::Ready(Err(_))) {
+            return flushed.map(|_| unreachable!());
         }
 
         // Now encipher a chunk.
         let len = min(input.len(), MAX_CHUNK_PLAINTEXT);
-        Self::write_chunk(&mut this, cx, &input[..len], false)
+        Poll::Ready(Self::write_chunk(&mut this, cx, &input[..len], false))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
         let mut this = self.project();
-        if let Some(p) = Self::flush(&mut this, cx) {
-            // Flushing our buffers either blocked or failed.
-            p.map(Err)
+        let flushed = Self::flush(&mut this, cx);
+        if matches!(flushed, Poll::Pending | Poll::Ready(Err(_))) {
+            flushed.map(|_| unreachable!())
         } else {
             this.dst.as_mut().poll_flush(cx)
         }
@@ -168,22 +173,21 @@ impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
         let mut this = self.project();
-        if let Some(value) = Self::flush(&mut this, cx) {
-            return value.map(Err);
+        let flushed = Self::flush(&mut this, cx);
+        if matches!(flushed, Poll::Pending | Poll::Ready(Err(_))) {
+            return flushed;
         }
 
         if !*this.closed {
             *this.closed = true;
-            if let Poll::Ready(Err(e)) = Self::write_chunk(&mut this, cx, &[], true) {
+            if let Err(e) = Self::write_chunk(&mut this, cx, &[], true) {
                 return Poll::Ready(Err(e));
             }
             // `write_chunk` might have buffered some data after being blocked.
-            // We have to try to write that out here.
-            // If the write was partly successful, the underlying sink (`dst`)
-            // won't be responsible for waking `cx`.
-            // `flush` forces that to take responsibility for waking.
-            if let Some(value) = Self::flush(&mut this, cx) {
-                return value.map(Err);
+            // We have to try to write that out here (see `flush()` for details).
+            let flushed = Self::flush(&mut this, cx);
+            if matches!(flushed, Poll::Pending | Poll::Ready(Err(_))) {
+                return flushed;
             }
         }
         this.dst.as_mut().poll_close(cx)
