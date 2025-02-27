@@ -383,7 +383,10 @@ mod nss {
 
     #[cfg(feature = "gecko")]
     fn setup_for_gecko() -> Vec<String> {
-        use mozbuild::{TOPOBJDIR, config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS}};
+        use mozbuild::{
+            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
+            TOPOBJDIR,
+        };
 
         let mut flags: Vec<String> = Vec::new();
 
