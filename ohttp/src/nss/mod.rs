@@ -11,11 +11,12 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
-pub use self::p11::{random, PrivateKey, PublicKey};
+use std::{ptr::null, sync::OnceLock};
+
 use err::secstatus_to_res;
 pub use err::Error;
-use lazy_static::lazy_static;
-use std::ptr::null;
+
+pub use self::p11::{random, PrivateKey, PublicKey};
 
 #[allow(clippy::pedantic, non_upper_case_globals, clippy::upper_case_acronyms)]
 mod nss_init {
@@ -29,39 +30,37 @@ const SECSuccess: SECStatus = nss_init::_SECStatus_SECSuccess;
 #[allow(non_upper_case_globals)]
 const SECFailure: SECStatus = nss_init::_SECStatus_SECFailure;
 
-#[derive(PartialEq, Eq)]
-enum NssLoaded {
-    External,
-    NoDb,
-}
-
-impl Drop for NssLoaded {
-    fn drop(&mut self) {
-        if matches!(self, Self::NoDb) {
-            unsafe {
-                secstatus_to_res(nss_init::NSS_Shutdown()).expect("NSS Shutdown failed");
-            }
-        }
-    }
-}
-
-lazy_static! {
-    static ref INITIALIZED: NssLoaded = {
-        if already_initialized() {
-            return NssLoaded::External;
-        }
-
-        secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-
-        NssLoaded::NoDb
-    };
-}
-
 fn already_initialized() -> bool {
     unsafe { nss_init::NSS_IsInitialized() != 0 }
 }
 
 /// Initialize NSS.  This only executes the initialization routines once.
 pub fn init() {
-    lazy_static::initialize(&INITIALIZED);
+    #[derive(PartialEq, Eq)]
+    enum NssLoaded {
+        External,
+        Loaded,
+    }
+
+    impl Drop for NssLoaded {
+        fn drop(&mut self) {
+            if matches!(self, Self::Loaded) {
+                unsafe {
+                    secstatus_to_res(nss_init::NSS_Shutdown()).expect("NSS Shutdown failed");
+                }
+            }
+        }
+    }
+
+    static INITIALIZED: OnceLock<NssLoaded> = OnceLock::new();
+
+    INITIALIZED.get_or_init(|| {
+        if already_initialized() {
+            NssLoaded::External
+        } else {
+            secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) })
+                .expect("NSS_NoDB_Init failed");
+            NssLoaded::Loaded
+        }
+    });
 }

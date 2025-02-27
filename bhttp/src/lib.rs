@@ -1,46 +1,26 @@
 #![deny(warnings, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
-#[cfg(feature = "read-bhttp")]
-use std::convert::TryFrom;
-#[cfg(any(
-    feature = "read-http",
-    feature = "write-http",
-    feature = "read-bhttp",
-    feature = "write-bhttp"
-))]
-use std::io;
+use std::{convert::TryFrom, io};
 
-#[cfg(feature = "read-http")]
+#[cfg(feature = "http")]
 use url::Url;
 
 mod err;
 mod parse;
-#[cfg(any(feature = "read-bhttp", feature = "write-bhttp"))]
 mod rw;
 
-#[cfg(any(feature = "read-http", feature = "read-bhttp",))]
 use std::borrow::BorrowMut;
 
 pub use err::Error;
-#[cfg(any(
-    feature = "read-http",
-    feature = "write-http",
-    feature = "read-bhttp",
-    feature = "write-bhttp"
-))]
 use err::Res;
-#[cfg(feature = "read-http")]
+#[cfg(feature = "http")]
 use parse::{downcase, is_ows, read_line, split_at, COLON, SEMICOLON, SLASH, SP};
 use parse::{index_of, trim_ows, COMMA};
-#[cfg(feature = "read-bhttp")]
-use rw::{read_varint, read_vec};
-#[cfg(feature = "write-bhttp")]
-use rw::{write_len, write_varint, write_vec};
+use rw::{read_varint, read_vec, write_len, write_varint, write_vec};
 
-#[cfg(feature = "read-http")]
+#[cfg(feature = "http")]
 const CONTENT_LENGTH: &[u8] = b"content-length";
-#[cfg(feature = "read-bhttp")]
 const COOKIE: &[u8] = b"cookie";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
@@ -93,7 +73,6 @@ impl<T> ReadSeek for io::Cursor<T> where T: AsRef<[u8]> {}
 impl<T> ReadSeek for io::BufReader<T> where T: io::Read + io::Seek {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(any(feature = "read-bhttp", feature = "write-bhttp"))]
 pub enum Mode {
     KnownLength,
     IndeterminateLength,
@@ -120,7 +99,7 @@ impl Field {
         &self.value
     }
 
-    #[cfg(feature = "write-http")]
+    #[cfg(feature = "http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         w.write_all(&self.name)?;
         w.write_all(b": ")?;
@@ -129,14 +108,13 @@ impl Field {
         Ok(())
     }
 
-    #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, w: &mut impl io::Write) -> Res<()> {
         write_vec(&self.name, w)?;
         write_vec(&self.value, w)?;
         Ok(())
     }
 
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     pub fn obs_fold(&mut self, extra: &[u8]) {
         self.value.push(SP);
         self.value.extend(trim_ows(extra));
@@ -192,7 +170,7 @@ impl FieldSection {
 
     /// As required by the HTTP specification, remove the Connection header
     /// field, everything it refers to, and a few extra fields.
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     fn strip_connection_headers(&mut self) {
         const CONNECTION: &[u8] = b"connection";
         const PROXY_CONNECTION: &[u8] = b"proxy-connection";
@@ -232,7 +210,7 @@ impl FieldSection {
         });
     }
 
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     fn parse_line(fields: &mut Vec<Field>, line: Vec<u8>) -> Res<()> {
         // obs-fold is helpful in specs, so support it here too
         let f = if is_ows(line[0]) {
@@ -251,7 +229,7 @@ impl FieldSection {
         Ok(())
     }
 
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     pub fn read_http<T, R>(r: &mut T) -> Res<Self>
     where
         T: BorrowMut<R> + ?Sized,
@@ -267,7 +245,6 @@ impl FieldSection {
         }
     }
 
-    #[cfg(feature = "read-bhttp")]
     fn read_bhttp_fields<T, R>(terminator: bool, r: &mut T) -> Res<Vec<Field>>
     where
         T: BorrowMut<R> + ?Sized,
@@ -302,7 +279,6 @@ impl FieldSection {
         }
     }
 
-    #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp<T, R>(mode: Mode, r: &mut T) -> Res<Self>
     where
         T: BorrowMut<R> + ?Sized,
@@ -320,7 +296,6 @@ impl FieldSection {
         Ok(Self(fields))
     }
 
-    #[cfg(feature = "write-bhttp")]
     fn write_bhttp_headers(&self, w: &mut impl io::Write) -> Res<()> {
         for f in &self.0 {
             f.write_bhttp(w)?;
@@ -328,7 +303,6 @@ impl FieldSection {
         Ok(())
     }
 
-    #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         if mode == Mode::KnownLength {
             let mut buf = Vec::new();
@@ -341,7 +315,7 @@ impl FieldSection {
         Ok(())
     }
 
-    #[cfg(feature = "write-http")]
+    #[cfg(feature = "http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         for f in &self.0 {
             f.write_http(w)?;
@@ -420,7 +394,7 @@ impl ControlData {
         }
     }
 
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     pub fn read_http(line: Vec<u8>) -> Res<Self> {
         //  request-line = method SP request-target SP HTTP-version
         //  status-line = HTTP-version SP status-code SP [reason-phrase]
@@ -467,7 +441,6 @@ impl ControlData {
         }
     }
 
-    #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp<T, R>(request: bool, r: &mut T) -> Res<Self>
     where
         T: BorrowMut<R> + ?Sized,
@@ -493,7 +466,6 @@ impl ControlData {
     }
 
     /// If this is an informational response.
-    #[cfg(any(feature = "read-bhttp", feature = "read-http"))]
     #[must_use]
     fn informational(&self) -> Option<StatusCode> {
         match self {
@@ -502,7 +474,6 @@ impl ControlData {
         }
     }
 
-    #[cfg(feature = "write-bhttp")]
     #[must_use]
     fn code(&self, mode: Mode) -> u64 {
         match (self, mode) {
@@ -513,7 +484,6 @@ impl ControlData {
         }
     }
 
-    #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, w: &mut impl io::Write) -> Res<()> {
         match self {
             Self::Request {
@@ -532,7 +502,7 @@ impl ControlData {
         Ok(())
     }
 
-    #[cfg(feature = "write-http")]
+    #[cfg(feature = "http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         match self {
             Self::Request {
@@ -581,7 +551,6 @@ impl InformationalResponse {
         &self.fields
     }
 
-    #[cfg(feature = "write-bhttp")]
     fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         write_varint(self.status.code(), w)?;
         self.fields.write_bhttp(mode, w)?;
@@ -662,7 +631,7 @@ impl Message {
         &self.trailer
     }
 
-    #[cfg(feature = "read-http")]
+    #[cfg(feature = "http")]
     fn read_chunked<T, R>(r: &mut T) -> Res<Vec<u8>>
     where
         T: BorrowMut<R> + ?Sized,
@@ -686,8 +655,7 @@ impl Message {
         }
     }
 
-    #[cfg(feature = "read-http")]
-    #[allow(clippy::read_zero_byte_vec)] // https://github.com/rust-lang/rust-clippy/issues/9274
+    #[cfg(feature = "http")]
     pub fn read_http<T, R>(r: &mut T) -> Res<Self>
     where
         T: BorrowMut<R> + ?Sized,
@@ -741,7 +709,7 @@ impl Message {
         })
     }
 
-    #[cfg(feature = "write-http")]
+    #[cfg(feature = "http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         for info in &self.informational {
             ControlData::Response(info.status()).write_http(w)?;
@@ -770,7 +738,6 @@ impl Message {
     }
 
     /// Read a BHTTP message.
-    #[cfg(feature = "read-bhttp")]
     pub fn read_bhttp<T, R>(r: &mut T) -> Res<Self>
     where
         T: BorrowMut<R> + ?Sized,
@@ -815,7 +782,6 @@ impl Message {
         })
     }
 
-    #[cfg(feature = "write-bhttp")]
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         write_varint(self.control.code(mode), w)?;
         for info in &self.informational {
@@ -833,7 +799,7 @@ impl Message {
     }
 }
 
-#[cfg(feature = "write-http")]
+#[cfg(feature = "http")]
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut buf = Vec::new();

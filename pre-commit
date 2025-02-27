@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# This is a pre-commit hook that validates code formatting.
+# This is a pre-commit hook that validates code.
 #
 # Install this by running the script with an argument of "install",
 # which installs a symlink to .git/hooks/precommit:
 # $ ln -s ../../hooks/pre-commit .git/hooks/pre-commit
+#
+# Run "./pre-commit all" to have this run a more complete set of tests
+# over the current tree.
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)"
 
@@ -25,9 +28,11 @@ fi
 
 # Check formatting.
 if [[ "$1" != "all" ]]; then
-    msg="pre-commit stash @$(git rev-parse --short @) $RANDOM"
-    trap 'git stash list -1 --format="format:%s" | grep -q "'"$msg"'" && git stash pop -q' EXIT
-    git stash push -k -u -q -m "$msg"
+    dotgit="$(git rev-parse --git-dir)"
+    msg="pre-commit stash @$(git rev-parse --short @) $$-$RANDOM"
+    trap 'git stash list -1 --format="format:%s" | grep -q "'"$msg"'" && git stash pop -q && mv "'"$root"'"/MERGE_* "'"$dotgit"'"' EXIT
+    mv "$dotgit"/MERGE_* "$root"
+    git stash push -kuq -m "$msg"
 fi
 if ! errors=($(cargo fmt -- --check --config imports_granularity=crate -l)); then
     echo "Formatting errors found."
@@ -37,17 +42,22 @@ if ! errors=($(cargo fmt -- --check --config imports_granularity=crate -l)); the
     done
     exit 1
 fi
-if ! cargo clippy --tests; then
-    exit 1
+versions=(stable)
+if [[ "$1" == "all" ]]; then
+    versions+=(1.81.0)
 fi
-if ! cargo test; then
-    exit 1
-fi
-if [[ -n "$NSS_DIR" ]]; then
-    if ! cargo clippy --tests --no-default-features --features nss; then
+check() {
+    if ! "$@"; then
+        echo "Failed [$?]: ${@@Q}"
         exit 1
     fi
-    if ! cargo test --no-default-features --features nss; then
-        exit 1
+}
+
+for v in "${versions[@]}"; do
+    check cargo "+$v" clippy --tests
+    check cargo "+$v" test
+    if [[ -n "$NSS_DIR" ]]; then
+        check cargo "+$v" clippy --tests --no-default-features --features nss,http
+        check cargo "+$v" test --no-default-features --features nss,http
     fi
-fi
+done

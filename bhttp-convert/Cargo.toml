@@ -1,12 +1,16 @@
 [package]
 name = "bhttp-convert"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
+description = "Simple Tool Converting Between HTTP/1.1 and Binary HTTP"
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 structopt = "0.3"
 
 [dependencies.bhttp]
 path= "../bhttp"
-features = ["bhttp", "http"]
+features = ["http"]

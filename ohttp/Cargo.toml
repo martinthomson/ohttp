@@ -1,24 +1,24 @@
 [package]
 name = "ohttp"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
-rust-version = "1.63.0"
+description = "Oblivious HTTP (RFC 9458)"
 build = "build.rs"
-license = "MIT OR Apache-2.0"
-description = "Oblivious HTTP"
-repository = "https://github.com/martinthomson/ohttp"
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [features]
 default = ["client", "server", "rust-hpke"]
 app-svc = ["nss"]
 client = []
 external-sqlite = []
-gecko = ["nss", "mozbuild"]
-nss = ["bindgen", "regex-mess"]
-pq = ["hpke-pq"]
-regex-mess = ["regex", "regex-automata", "regex-syntax"]
-rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke"]
+gecko = ["nss", "dep:mozbuild"]
+nss = ["dep:bindgen", "regex-mess"]
+pq = ["dep:hpke-pq"]
+regex-mess = ["dep:regex", "dep:regex-automata", "dep:regex-syntax"]
+rust-hpke = ["dep:rand", "dep:aead", "dep:aes-gcm", "dep:chacha20poly1305", "dep:hkdf", "dep:sha2", "dep:hpke"]
 server = []
 
 [dependencies]
@@ -29,7 +29,6 @@ chacha20poly1305 = {version = "0.8", optional = true}
 hex = "0.4"
 hkdf = {version = "0.11", optional = true}
 hpke = {version = "0.11.0", optional = true, default-features = false, features = ["std", "x25519"]}
-lazy_static = "1.4"
 log = {version = "0.4", default-features = false}
 rand = {version = "0.8", optional = true}
 # bindgen uses regex and friends, which have been updated past our MSRV
