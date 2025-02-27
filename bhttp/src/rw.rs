@@ -156,7 +156,7 @@ mod test {
     #[test]
     #[should_panic(expected = "varint value too large")]
     fn too_big() {
-        _ = write_varint(0x4000_0000_0000_0000_u64, &mut Vec::new());
+        std::mem::drop(write_varint(0x4000_0000_0000_0000_u64, &mut Vec::new()));
     }
 
     #[test]
