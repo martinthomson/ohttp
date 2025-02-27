@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::err::{secstatus_to_res, Error};
-use crate::err::Res;
 use std::{
     convert::TryFrom,
     marker::PhantomData,
@@ -13,6 +11,9 @@ use std::{
     os::raw::{c_int, c_uint},
     ptr::null_mut,
 };
+
+use super::err::{secstatus_to_res, Error};
+use crate::err::Res;
 
 #[allow(
     clippy::pedantic,
@@ -235,7 +236,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     pub fn new(v: &'a mut T) -> Self {
         let item = SECItem {
             type_: SECItemType::siBuffer,
-            data: (v as *mut T).cast::<u8>(),
+            data: std::ptr::from_mut(v).cast::<u8>(),
             len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         };
         Self {
@@ -261,7 +262,7 @@ impl Item {
     pub(crate) fn wrap(buf: &[u8]) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
-            data: buf.as_ptr() as *mut u8,
+            data: buf.as_ptr().cast_mut(),
             len: c_uint::try_from(buf.len()).unwrap(),
         }
     }
