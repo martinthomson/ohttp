@@ -69,10 +69,15 @@ check() {
         exit 1
     fi
 }
-
-check "clippy" cargo clippy --tests
-check "test" cargo test
-if [[ -n "$NSS_DIR" ]]; then
-    check "clippy(NSS)" cargo clippy --tests --no-default-features --features nss
-    check "test(NSS)" cargo test --no-default-features --features nss
+versions=(stable)
+if [[ "$1" == "all" ]]; then
+    versions+=(1.81.0)
 fi
+for v in "${versions[@]}"; do
+    check "clippy" cargo "+$v" clippy --tests
+    check "test" cargo "+$v" test
+    if [[ -n "$NSS_DIR" ]]; then
+        check "clippy(NSS)" cargo "+$v" clippy --tests --no-default-features --features nss,http
+        check "test(NSS)" cargo "+$v" test --no-default-features --features nss,http
+    fi
+done
