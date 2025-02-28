@@ -1,11 +1,12 @@
 #![deny(warnings, clippy::pedantic)]
 
-use bhttp::{Message, Mode};
 use std::{
     fs::File,
     io::{self, Read},
     path::PathBuf,
 };
+
+use bhttp::{Message, Mode};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
