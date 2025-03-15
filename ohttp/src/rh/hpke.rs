@@ -1,15 +1,13 @@
-use super::SymKey;
-use crate::{
-    hpke::{Aead, Kdf, Kem},
-    Error, Res,
-};
+use std::ops::Deref;
 
 #[cfg(not(feature = "pq"))]
 use ::hpke as rust_hpke;
-
 #[cfg(feature = "pq")]
 use ::hpke_pq as rust_hpke;
-
+use ::rand::thread_rng;
+use log::trace;
+#[cfg(feature = "pq")]
+use rust_hpke::kem::X25519Kyber768Draft00;
 use rust_hpke::{
     aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, ChaCha20Poly1305},
     kdf::HkdfSha256,
@@ -17,12 +15,12 @@ use rust_hpke::{
     setup_receiver, setup_sender, Deserializable, OpModeR, OpModeS, Serializable,
 };
 
-#[cfg(feature = "pq")]
-use rust_hpke::kem::X25519Kyber768Draft00;
-
-use ::rand::thread_rng;
-use log::trace;
-use std::ops::Deref;
+use super::SymKey;
+use crate::{
+    crypto::{Decrypt, Encrypt},
+    hpke::{Aead, Kdf, Kem},
+    Error, Res,
+};
 
 /// Configuration for `Hpke`.
 #[derive(Clone, Copy)]
@@ -306,12 +304,18 @@ impl HpkeS {
     pub fn enc(&self) -> Res<Vec<u8>> {
         Ok(self.enc.clone())
     }
+}
 
-    pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
+impl Encrypt for HpkeS {
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
         let mut buf = pt.to_owned();
         let mut tag = self.context.seal(&mut buf, aad)?;
         buf.append(&mut tag);
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -525,12 +529,18 @@ impl HpkeR {
             ),
         })
     }
+}
 
-    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+impl Decrypt for HpkeR {
+    fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
         let mut buf = ct.to_owned();
         let pt_len = self.context.open(&mut buf, aad)?.len();
         buf.truncate(pt_len);
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -597,6 +607,7 @@ pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
 mod test {
     use super::{generate_key_pair, Config, HpkeR, HpkeS};
     use crate::{
+        crypto::{Decrypt, Encrypt},
         hpke::{Aead, Kem},
         init,
     };

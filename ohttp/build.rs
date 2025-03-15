@@ -344,7 +344,7 @@ mod nss {
         assert_eq!(
             v.next(),
             Some("3"),
-            "NSS version 3.62 or higher is needed (or set $NSS_DIR)"
+            "  version 3.62 or higher is needed (or set $NSS_DIR)"
         );
         if let Some(minor) = v.next() {
             let minor = minor
