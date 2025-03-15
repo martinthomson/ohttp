@@ -51,7 +51,7 @@ impl<D, E> ChunkWriter<D, E> {
         let v: u64 = len.try_into().unwrap();
         let (v, len) = match () {
             () if v < (1 << 6) => (v, 1),
-            () if v < (1 << 14) => (v | 1 << 14, 2),
+            () if v < (1 << 14) => (v | (1 << 14), 2),
             () if v < (1 << 30) => (v | (2 << 30), 4),
             () if v < (1 << 62) => (v | (3 << 62), 8),
             () => panic!("varint value too large"),
