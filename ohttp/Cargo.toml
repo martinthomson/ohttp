@@ -38,7 +38,7 @@ regex = {version = "~1.9", optional = true}
 regex-automata = {version = "~0.3", optional = true}
 regex-syntax = {version = "~0.7", optional = true}
 sha2 = {version = "0.9", optional = true}
-thiserror = "1"
+thiserror = "2"
 
 [dependencies.hpke-pq]
 package = "hpke_pq"
