@@ -120,7 +120,7 @@ impl PrivateKey {
 impl std::fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Ok(b) = self.key_data() {
-            write!(f, "PrivateKey {}", hex::encode(b))
+            write!(f, "PrivateKey [REDACTED]")
         } else {
             write!(f, "Opaque PrivateKey")
         }
