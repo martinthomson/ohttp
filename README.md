@@ -138,4 +138,4 @@ install itself.
 
 ## Minnimum Supported Rust Version (MSRV)
 
-`ohttp` and `bhttp` should compile on Rust 1.63.0.
+`ohttp` and `bhttp` should compile on Rust 1.81.0.

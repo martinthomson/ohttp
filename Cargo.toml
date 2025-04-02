@@ -8,3 +8,11 @@ members = [
   "ohttp-client-cli",
   "ohttp-server",
 ]
+
+[workspace.package]
+version = "0.6.0"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+edition = "2021"
+rust-version = "1.81.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/martinthomson/ohttp"

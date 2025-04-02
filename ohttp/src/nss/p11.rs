@@ -238,7 +238,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     pub fn new(v: &'a mut T) -> Self {
         let item = SECItem {
             type_: SECItemType::siBuffer,
-            data: (v as *mut T).cast::<u8>(),
+            data: std::ptr::from_mut(v).cast::<u8>(),
             len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         };
         Self {
@@ -264,7 +264,7 @@ impl Item {
     pub(crate) fn wrap(buf: &[u8]) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
-            data: buf.as_ptr() as *mut u8,
+            data: buf.as_ptr().cast_mut(),
             len: c_uint::try_from(buf.len()).unwrap(),
         }
     }
