@@ -79,7 +79,7 @@ where
     T: Copy,
 {
     fn eq(&self, other: &T) -> bool {
-        StatusCode::try_from(*other).map_or(false, |o| o.0 == self.0)
+        StatusCode::try_from(*other).is_ok_and(|o| o.0 == self.0)
     }
 }
 

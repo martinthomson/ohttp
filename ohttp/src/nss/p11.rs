@@ -9,7 +9,7 @@ use std::{
     marker::PhantomData,
     mem,
     os::raw::{c_int, c_uint},
-    ptr::null_mut,
+    ptr::{self, null_mut},
 };
 
 use super::err::{secstatus_to_res, Error};
@@ -117,11 +117,12 @@ impl Clone for PrivateKey {
 
 impl std::fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Ok(b) = self.key_data() {
-            write!(f, "PrivateKey {}", hex::encode(b))
-        } else {
-            write!(f, "Opaque PrivateKey")
+        if cfg!(feature = "unsafe-print-secrets") {
+            if let Ok(b) = self.key_data() {
+                return write!(f, "PrivateKey {}", hex::encode(b));
+            }
         }
+        write!(f, "Opaque PrivateKey")
     }
 }
 
@@ -206,11 +207,12 @@ impl Clone for SymKey {
 
 impl std::fmt::Debug for SymKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Ok(b) = self.key_data() {
-            write!(f, "SymKey {}", hex::encode(b))
-        } else {
-            write!(f, "Opaque SymKey")
+        if cfg!(feature = "unsafe-print-secrets") {
+            if let Ok(b) = self.key_data() {
+                return write!(f, "SymKey {}", hex::encode(b));
+            }
         }
+        write!(f, "Opaque SymKey")
     }
 }
 
@@ -236,7 +238,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     pub fn new(v: &'a mut T) -> Self {
         let item = SECItem {
             type_: SECItemType::siBuffer,
-            data: (v as *mut T).cast::<u8>(),
+            data: ptr::from_mut::<T>(v).cast::<u8>(),
             len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         };
         Self {
@@ -246,7 +248,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     }
 
     pub fn ptr(&mut self) -> *mut SECItem {
-        std::ptr::addr_of_mut!(self.item)
+        ptr::addr_of_mut!(self.item)
     }
 }
 
@@ -262,7 +264,7 @@ impl Item {
     pub(crate) fn wrap(buf: &[u8]) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
-            data: buf.as_ptr() as *mut u8,
+            data: buf.as_ptr().cast_mut(), // const cast here
             len: c_uint::try_from(buf.len()).unwrap(),
         }
     }

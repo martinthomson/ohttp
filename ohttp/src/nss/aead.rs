@@ -73,6 +73,7 @@ pub struct Aead {
     algorithm: AeadId,
     ctx: Context,
     nonce_base: [u8; NONCE_LEN],
+    decrypt_counter: SequenceNumber,
 }
 
 impl Aead {
@@ -125,6 +126,7 @@ impl Aead {
             algorithm,
             ctx: Context::from_ptr(ptr)?,
             nonce_base,
+            decrypt_counter: 0,
         })
     }
 
@@ -156,7 +158,6 @@ impl Aead {
         Ok(pt)
     }
 
-    #[allow(dead_code)]
     pub fn open_seq(&mut self, aad: &[u8], seq: SequenceNumber, ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
         let mut nonce = self.nonce_base;
@@ -171,9 +172,10 @@ impl Aead {
 impl Decrypt for Aead {
     fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
         assert_eq!(self.mode, Mode::Decrypt);
-        // Note: NSS will write to the nonce with `CKG_GENERATE_COUNTER_XOR`
-        let mut nonce = self.nonce_base;
-        Self::do_open(&self.ctx, aad, ct, &mut nonce, CKG_GENERATE_COUNTER_XOR)
+        // Note: NSS doesn't do any nonce generation for decryption, which is CRAZY.
+        let counter = self.decrypt_counter;
+        self.decrypt_counter += 1;
+        self.open_seq(aad, counter, ct)
     }
 
     fn alg(&self) -> AeadId {

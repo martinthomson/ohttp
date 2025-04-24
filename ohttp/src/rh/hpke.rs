@@ -117,11 +117,12 @@ impl PrivateKey {
 
 impl std::fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Ok(b) = self.key_data() {
-            write!(f, "PrivateKey {}", hex::encode(b))
-        } else {
-            write!(f, "Opaque PrivateKey")
+        if cfg!(feature = "unsafe-print-secrets") {
+            if let Ok(b) = self.key_data() {
+                return write!(f, "PrivateKey {}", hex::encode(b));
+            }
         }
+        write!(f, "Opaque PrivateKey")
     }
 }
 

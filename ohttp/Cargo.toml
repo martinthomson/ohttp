@@ -1,9 +1,9 @@
 [package]
 name = "ohttp"
-version = "0.5.3"
+version = "0.5.4"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
-rust-version = "1.63.0"
+rust-version = "1.82.0"
 build = "build.rs"
 license = "MIT OR Apache-2.0"
 description = "Oblivious HTTP"
@@ -21,6 +21,7 @@ regex-mess = ["dep:regex", "dep:regex-automata", "dep:regex-syntax"]
 rust-hpke = ["dep:rand", "dep:aead", "dep:aes-gcm", "dep:chacha20poly1305", "dep:hkdf", "dep:sha2", "dep:hpke"]
 server = []
 stream = ["dep:futures", "dep:pin-project"]
+unsafe-print-secrets = []
 
 [dependencies]
 aead = {version = "0.4", optional = true, features = ["std"]}
