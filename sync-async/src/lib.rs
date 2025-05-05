@@ -115,6 +115,11 @@ impl<S: AsyncRead + Unpin> SyncRead for S {
     }
 }
 
+pub trait Unadapt {
+    type S;
+    fn unadapt(self) -> Self::S;
+}
+
 #[pin_project(project = DribbleProjection)]
 pub struct Dribble<S> {
     #[pin]
@@ -127,6 +132,13 @@ impl<S> Dribble<S> {
     }
 
     pub fn unwrap(self) -> S {
+        self.s
+    }
+}
+
+impl<S> Unadapt for Dribble<S> {
+    type S = S;
+    fn unadapt(self) -> Self::S {
         self.s
     }
 }
@@ -177,8 +189,11 @@ impl<S> SplitAt<S> {
             remaining: Some(offset),
         }
     }
+}
 
-    pub fn unwrap(self) -> S {
+impl<S> Unadapt for SplitAt<S> {
+    type S = S;
+    fn unadapt(self) -> Self::S {
         self.s
     }
 }
@@ -255,10 +270,6 @@ impl<S> Stutter<S> {
         Self { stall: false, s }
     }
 
-    pub fn unwrap(self) -> S {
-        self.s
-    }
-
     fn stutter<T, F>(self: Pin<&mut Self>, cx: &mut Context<'_>, f: F) -> Poll<T>
     where
         F: FnOnce(Pin<&mut S>, &mut Context<'_>) -> Poll<T>,
@@ -268,12 +279,19 @@ impl<S> Stutter<S> {
         if *this.stall {
             // When returning `Poll::Pending`, you have to wake the task.
             // We aren't running code anywhere except here,
-            // so call it here and ensure that the task is picked up.
+            // so call it here and ensure that the task is picked up immediately.
             cx.waker().wake_by_ref();
             Poll::Pending
         } else {
             f(this.s.as_mut(), cx)
         }
+    }
+}
+
+impl<S> Unadapt for Stutter<S> {
+    type S = S;
+    fn unadapt(self) -> Self::S {
+        self.s
     }
 }
 

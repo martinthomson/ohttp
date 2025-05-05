@@ -761,9 +761,16 @@ impl<S: AsyncRead> AsyncRead for ClientResponse<S> {
 
 #[cfg(test)]
 mod test {
+    use std::{
+        io::Result as IoResult,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
     use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use log::trace;
-    use sync_async::{Dribble, Pipe, Stutter, SyncRead, SyncResolve};
+    use pin_project::pin_project;
+    use sync_async::{Dribble, Pipe, SplitAt, Stutter, SyncRead, SyncResolve, Unadapt};
 
     use crate::{
         test::{init, make_config, REQUEST, RESPONSE},
@@ -856,23 +863,82 @@ mod test {
         trace!("Response: {}", hex::encode(response_buf));
     }
 
-    /// Write something out, but first wrap it in `Stutter` and `Dribble`.
-    #[must_use]
-    fn write_sd<S: AsyncWrite + AsyncWriteExt + Unpin>(s: S, data: &[u8]) -> S {
-        let mut s = Stutter::new(Dribble::new(s));
+    fn write_wrapped<S, W, T>(s: S, w: W, data: &[u8]) -> S
+    where
+        S: AsyncWrite + AsyncWriteExt + Unpin,
+        W: FnOnce(S) -> T,
+        T: AsyncWrite + AsyncWriteExt + Unpin + Unadapt<S = S>,
+    {
+        let mut s = w(s);
         s.write_all(data).sync_resolve().unwrap();
         s.close().sync_resolve().unwrap();
-        s.unwrap().unwrap()
+        s.unadapt()
     }
-    /// Read something in, but first wrap it in `Stutter` and `Dribble`.
-    #[must_use]
-    fn read_sd<S: AsyncRead + AsyncReadExt + Unpin>(s: S) -> (Vec<u8>, S) {
-        let mut s = Stutter::new(Dribble::new(s));
-        (s.sync_read_to_end(), s.unwrap().unwrap())
+
+    fn read_wrapped<S, W, T>(s: S, w: W) -> (Vec<u8>, S)
+    where
+        S: AsyncRead + AsyncReadExt + Unpin,
+        W: FnOnce(S) -> T,
+        T: AsyncRead + AsyncReadExt + Unpin + Unadapt<S = S>,
+    {
+        let mut s = w(s);
+        (s.sync_read_to_end(), s.unadapt())
+    }
+
+    /// With each on its own, Stutter and Dribble don't cause the code to do anything differently.
+    /// You need both in order to effect a change in the way that the streaming code operates.
+    #[pin_project]
+    struct StutterDribble<S> {
+        #[pin]
+        s: Stutter<Dribble<S>>,
+    }
+
+    impl<S> StutterDribble<S> {
+        fn new(s: S) -> Self {
+            Self {
+                s: Stutter::new(Dribble::new(s)),
+            }
+        }
+    }
+
+    impl<S> Unadapt for StutterDribble<S> {
+        type S = S;
+        fn unadapt(self) -> Self::S {
+            self.s.unadapt().unadapt()
+        }
+    }
+
+    impl<S: AsyncRead + Unpin> AsyncRead for StutterDribble<S> {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            let this = self.project();
+            this.s.poll_read(cx, buf)
+        }
+    }
+
+    impl<S: AsyncWrite + Unpin> AsyncWrite for StutterDribble<S> {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<IoResult<usize>> {
+            self.project().s.poll_write(cx, buf)
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            self.project().s.poll_flush(cx)
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            self.project().s.poll_close(cx)
+        }
     }
 
     /// Run the `request_response` test, but do it with streams that are one byte apiece
-    /// on the input side.
+    /// on the input side.  This is the one that produces the most output.
     #[test]
     fn dribble_in() {
         init();
@@ -886,7 +952,7 @@ mod test {
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (mut request_read, request_write) = Pipe::new();
         let client_request = client.encapsulate_stream(request_write).unwrap();
-        let client_request = write_sd(client_request, REQUEST);
+        let client_request = write_wrapped(client_request, StutterDribble::new, REQUEST);
 
         trace!("Request: {}", hex::encode(REQUEST));
         let enc_request = request_read.sync_read_to_end();
@@ -895,20 +961,70 @@ mod test {
         // The server receives a request.
         let enc_req_stream = &enc_request[..];
         let server_request = server.decapsulate_stream(enc_req_stream);
-        let (request_data, server_request) = read_sd(server_request);
+        let (request_data, server_request) = read_wrapped(server_request, StutterDribble::new);
         assert_eq!(request_data, REQUEST);
 
         // The server sends a response.
         let (mut response_read, response_write) = Pipe::new();
         let server_response = server_request.response(response_write).unwrap();
-        _ = write_sd(server_response, RESPONSE);
+        _ = write_wrapped(server_response, StutterDribble::new, RESPONSE);
 
         let enc_response = response_read.sync_read_to_end();
         trace!("Encapsulated Response: {}", hex::encode(&enc_response));
 
         // The client receives a response.
         let client_response = client_request.response(&enc_response[..]).unwrap();
-        let (response_data, _) = read_sd(client_response);
+        let (response_data, _) = read_wrapped(client_response, StutterDribble::new);
+        assert_eq!(response_data, RESPONSE);
+        trace!("Response: {}", hex::encode(response_data));
+    }
+
+    /// Run the `request_response` test, but do it with streams that are one byte apiece
+    /// on the input side.  This is the one that produces the most output.
+    #[test]
+    fn split_in() {
+        init();
+
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
+
+        // The client sends a request.
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let client_request = client.encapsulate_stream(request_write).unwrap();
+        let client_request = write_wrapped(
+            client_request,
+            |s| SplitAt::new(s, REQUEST.len() / 2),
+            REQUEST,
+        );
+
+        trace!("Request: {}", hex::encode(REQUEST));
+        let enc_request = request_read.sync_read_to_end();
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
+
+        // The server receives a request.
+        let enc_req_stream = &enc_request[..];
+        let server_request = server.decapsulate_stream(enc_req_stream);
+        let (request_data, server_request) = read_wrapped(server_request, Stutter::new);
+        assert_eq!(request_data, REQUEST);
+
+        // The server sends a response.
+        let (mut response_read, response_write) = Pipe::new();
+        let server_response = server_request.response(response_write).unwrap();
+        _ = write_wrapped(
+            server_response,
+            |s| SplitAt::new(s, RESPONSE.len() / 2),
+            RESPONSE,
+        );
+
+        let enc_response = response_read.sync_read_to_end();
+        trace!("Encapsulated Response: {}", hex::encode(&enc_response));
+
+        // The client receives a response.
+        let client_response = client_request.response(&enc_response[..]).unwrap();
+        let (response_data, _) = read_wrapped(client_response, Stutter::new);
         assert_eq!(response_data, RESPONSE);
         trace!("Response: {}", hex::encode(response_data));
     }
