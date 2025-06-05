@@ -1,21 +1,16 @@
 [package]
 name = "bhttp"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
-rust-version = "1.63.0"
-license = "MIT OR Apache-2.0"
-description = "Binary HTTP messages (RFC 9292)"
-repository = "https://github.com/martinthomson/ohttp"
+description = "Binary HTTP Messages (RFC 9292)"
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [features]
-default = ["bhttp"]
-bhttp = ["read-bhttp", "write-bhttp"]
-http = ["read-http", "write-http"]
-read-bhttp = []
-write-bhttp = []
-read-http = ["url"]
-write-http = []
+default = []
+http = ["dep:url"]
 
 [dependencies]
 thiserror = "1"

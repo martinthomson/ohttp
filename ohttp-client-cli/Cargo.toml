@@ -1,8 +1,12 @@
 [package]
 name = "ohttp-client-cli"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
+description = "Crude CLI Client for OHTTP"
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [features]
 default = ["rust-hpke"]
@@ -15,7 +19,7 @@ hex = "0.4"
 
 [dependencies.bhttp]
 path= "../bhttp"
-features = ["bhttp", "http"]
+features = ["http"]
 
 [dependencies.ohttp]
 path= "../ohttp"

@@ -23,7 +23,7 @@ jobs:
           - nss
           - rust-hpke
         rust:
-          - 1.63.0 # MSRV
+          - 1.81.0 # MSRV
           - stable
 
     steps:

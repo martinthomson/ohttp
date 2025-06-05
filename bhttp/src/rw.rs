@@ -1,12 +1,10 @@
-#[cfg(feature = "read-bhttp")]
-use std::borrow::BorrowMut;
-use std::{convert::TryFrom, io};
+use std::{borrow::BorrowMut, convert::TryFrom, io};
 
-use crate::err::Res;
-#[cfg(feature = "read-bhttp")]
-use crate::{err::Error, ReadSeek};
+use crate::{
+    err::{Error, Res},
+    ReadSeek,
+};
 
-#[cfg(feature = "write-bhttp")]
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) fn write_uint<const N: usize>(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into().to_be_bytes();
@@ -15,7 +13,6 @@ pub(crate) fn write_uint<const N: usize>(v: impl Into<u64>, w: &mut impl io::Wri
     Ok(())
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     let v = v.into();
     match () {
@@ -27,19 +24,16 @@ pub fn write_varint(v: impl Into<u64>, w: &mut impl io::Write) -> Res<()> {
     }
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_len(len: usize, w: &mut impl io::Write) -> Res<()> {
     write_varint(u64::try_from(len).unwrap(), w)
 }
 
-#[cfg(feature = "write-bhttp")]
 pub fn write_vec(v: &[u8], w: &mut impl io::Write) -> Res<()> {
     write_len(v.len(), w)?;
     w.write_all(v)?;
     Ok(())
 }
 
-#[cfg(feature = "read-bhttp")]
 fn read_uint<T, R>(n: usize, r: &mut T) -> Res<Option<u64>>
 where
     T: BorrowMut<R> + ?Sized,
@@ -60,7 +54,6 @@ where
     }
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_varint<T, R>(r: &mut T) -> Res<Option<u64>>
 where
     T: BorrowMut<R> + ?Sized,
@@ -79,7 +72,6 @@ where
     }
 }
 
-#[cfg(feature = "read-bhttp")]
 pub fn read_vec<T, R>(r: &mut T) -> Res<Option<Vec<u8>>>
 where
     T: BorrowMut<R> + ?Sized,
