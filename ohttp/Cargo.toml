@@ -1,6 +1,6 @@
 [package]
 name = "ohttp"
-version = "0.5.4"
+version = "0.5.5"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2021"
 rust-version = "1.63.0"
@@ -25,21 +25,21 @@ unsafe-print-secrets = []
 [dependencies]
 aead = {version = "0.4", optional = true, features = ["std"]}
 aes-gcm = {version = "0.9", optional = true}
-byteorder = "1.4"
+byteorder = "1.5"
 chacha20poly1305 = {version = "0.8", optional = true}
 hex = "0.4"
-hkdf = {version = "0.11", optional = true}
+hkdf = {version = "0.12", optional = true}
 hpke = {version = "0.11.0", optional = true, default-features = false, features = ["std", "x25519"]}
 lazy_static = "1.4"
 log = {version = "0.4", default-features = false}
 rand = {version = "0.8", optional = true}
 # bindgen uses regex and friends, which have been updated past our MSRV
 # however, the cargo resolver happily resolves versions that it can't compile
-regex = {version = "~1.9", optional = true}
-regex-automata = {version = "~0.3", optional = true}
-regex-syntax = {version = "~0.7", optional = true}
-sha2 = {version = "0.9", optional = true}
-thiserror = "1"
+regex = {version = "1.11", optional = true}
+regex-automata = {version = "0.4", optional = true}
+regex-syntax = {version = "0.8", optional = true}
+sha2 = {version = "0.10", optional = true}
+thiserror = "2"
 
 [dependencies.hpke-pq]
 package = "hpke_pq"
