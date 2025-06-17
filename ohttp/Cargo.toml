@@ -35,9 +35,9 @@ log = {version = "0.4", default-features = false}
 rand = {version = "0.8", optional = true}
 # bindgen uses regex and friends, which have been updated past our MSRV
 # however, the cargo resolver happily resolves versions that it can't compile
-regex = {version = "~1.9", optional = true}
-regex-automata = {version = "~0.3", optional = true}
-regex-syntax = {version = "~0.7", optional = true}
+regex = {version = "~1.11", optional = true}
+regex-automata = {version = "~0.4", optional = true}
+regex-syntax = {version = "~0.8", optional = true}
 sha2 = {version = "0.9", optional = true}
 thiserror = "1"
 
