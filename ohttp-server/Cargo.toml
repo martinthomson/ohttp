@@ -1,8 +1,16 @@
 [package]
 name = "ohttp-server"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
+description = "Test server for Oblivious HTTP"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [features]
 default = ["rust-hpke"]

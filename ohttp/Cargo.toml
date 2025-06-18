@@ -1,13 +1,16 @@
 [package]
 name = "ohttp"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
-rust-version = "1.63.0"
-build = "build.rs"
-license = "MIT OR Apache-2.0"
 description = "Oblivious HTTP"
-repository = "https://github.com/martinthomson/ohttp"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [features]
 default = ["client", "server", "rust-hpke"]
@@ -15,9 +18,8 @@ app-svc = ["nss"]
 client = []
 external-sqlite = []
 gecko = ["nss", "mozbuild"]
-nss = ["bindgen", "regex-mess"]
+nss = ["bindgen"]
 pq = ["hpke-pq"]
-regex-mess = ["regex", "regex-automata", "regex-syntax"]
 rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke"]
 server = []
 unsafe-print-secrets = []
@@ -30,14 +32,9 @@ chacha20poly1305 = {version = "0.8", optional = true}
 hex = "0.4"
 hkdf = {version = "0.11", optional = true}
 hpke = {version = "0.11.0", optional = true, default-features = false, features = ["std", "x25519"]}
-lazy_static = "1.4"
 log = {version = "0.4", default-features = false}
 rand = {version = "0.8", optional = true}
-# bindgen uses regex and friends, which have been updated past our MSRV
-# however, the cargo resolver happily resolves versions that it can't compile
 regex = {version = "~1.11", optional = true}
-regex-automata = {version = "~0.4", optional = true}
-regex-syntax = {version = "~0.8", optional = true}
 sha2 = {version = "0.9", optional = true}
 thiserror = "1"
 
