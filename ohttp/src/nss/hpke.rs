@@ -1,10 +1,3 @@
-use super::{
-    super::hpke::{Aead, Kdf, Kem},
-    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
-    p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey},
-};
-use crate::err::Res;
-use log::{log_enabled, trace};
 use std::{
     convert::TryFrom,
     ops::Deref,
@@ -12,7 +5,15 @@ use std::{
     ptr::{addr_of_mut, null, null_mut},
 };
 
+use log::{log_enabled, trace};
 pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
+
+use super::{
+    super::hpke::{Aead, Kdf, Kem},
+    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
+    p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey},
+};
+use crate::err::Res;
 
 /// Configuration for `Hpke`.
 #[derive(Clone, Copy)]
@@ -286,7 +287,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
     assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
     let sk = PrivateKey::from_ptr(secret_ptr)?;
     let pk = PublicKey::from_ptr(public_ptr)?;
-    trace!("Generated key pair: sk={:?} pk={:?}", sk, pk);
+    trace!("Generated key pair: sk={sk:?} pk={pk:?}");
     Ok((sk, pk))
 }
 

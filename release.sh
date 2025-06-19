@@ -13,11 +13,7 @@ trap 'echo "*** release failed"; exit 1' ERR
 [[ "$(git rev-parse --show-toplevel)" == "$(pwd -P)" ]] || ! echo "not in repository directory"
 
 v="${1#v}"
-<<<<<<< Updated upstream
-sed -i -e '/^\[package\]/,/^\[/{s/^version = ".*"/version = "'"$v"'"/;}' Cargo.toml
-=======
 sed -i -e '/^\[workspace\.package\]/,/^\[/{s/^version = ".*"/version = "'"$v"'"/;}' Cargo.toml
->>>>>>> Stashed changes
 git commit -m "Update version to $v" Cargo.toml || \
   echo "--- Version numbers already updated."
 git push origin main
