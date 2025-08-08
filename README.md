@@ -78,9 +78,11 @@ the server sees your IP address.
 
 The build setup is a little tricky, mostly because building NSS is a bit fiddly.
 
-First, you need a machine capable of [building
-NSS](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Building).
-For those on Ubuntu/Debian, the minimal set of prerequisites for an x64 build
+First, you need a machine capable of [building NSS](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Building).
+
+<details>
+<summary>For those on Ubuntu/Debian...</summary>
+The minimal set of prerequisites for an x64 build
 (and the later steps) can be installed using:
 
 ```sh
@@ -89,6 +91,21 @@ sudo apt-get install \
   build-essential clang llvm libclang-dev lld \
   gyp ninja-build pkg-config zlib1g-dev
 ```
+
+</details>
+
+
+<details>
+<summary>For those on Arch...</summary>
+The minimal set of prerequisites for an x64 build
+(and the later steps) can be installed using:
+
+```sh
+sudo apk add mercurial gyp ca-certificates coreutils \
+  curl git make mercurial clang llvm lld ninja-build
+```
+
+</details>
 
 You then need to clone this repository, the NSS repository, and the NSPR
 repository.  I generally put them all in the same place.

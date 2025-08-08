@@ -54,7 +54,6 @@ macro_rules! scoped_ptr {
 
         impl std::ops::Deref for $scoped {
             type Target = *mut $target;
-            #[must_use]
             fn deref(&self) -> &*mut $target {
                 &self.ptr
             }
@@ -88,7 +87,7 @@ impl PrivateKey {
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
-                &mut key_item,
+                &raw mut key_item,
             )
         })?;
         let slc = unsafe {
@@ -99,7 +98,7 @@ impl PrivateKey {
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
         unsafe {
-            SECITEM_FreeItem(&mut key_item, PRBool::from(false));
+            SECITEM_FreeItem(&raw mut key_item, PRBool::from(false));
         }
         Ok(key)
     }
@@ -107,7 +106,6 @@ impl PrivateKey {
 unsafe impl Send for PrivateKey {}
 
 impl Clone for PrivateKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { sys::SECKEY_CopyPrivateKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -137,7 +135,7 @@ impl PublicKey {
             sys::PK11_HPKE_Serialize(
                 **self,
                 buf.as_mut_ptr(),
-                &mut len,
+                &raw mut len,
                 c_uint::try_from(buf.len()).unwrap(),
             )
         })?;
@@ -149,7 +147,6 @@ impl PublicKey {
 unsafe impl Send for PublicKey {}
 
 impl Clone for PublicKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { sys::SECKEY_CopyPublicKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -197,7 +194,6 @@ impl SymKey {
 }
 
 impl Clone for SymKey {
-    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
         assert!(!ptr.is_null());
@@ -238,7 +234,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     pub fn new(v: &'a mut T) -> Self {
         let item = SECItem {
             type_: SECItemType::siBuffer,
-            data: ptr::from_mut::<T>(v).cast::<u8>(),
+            data: ptr::from_mut(v).cast::<u8>(),
             len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         };
         Self {
@@ -264,7 +260,7 @@ impl Item {
     pub(crate) fn wrap(buf: &[u8]) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
-            data: buf.as_ptr().cast_mut(), // const cast here
+            data: buf.as_ptr().cast_mut(), // const cast :(
             len: c_uint::try_from(buf.len()).unwrap(),
         }
     }

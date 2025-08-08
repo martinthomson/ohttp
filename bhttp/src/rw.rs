@@ -119,7 +119,7 @@ mod test {
         ] {
             let mut buf = Vec::new();
             write_varint(i, &mut buf).unwrap();
-            let sz_bytes = (64 - i.leading_zeros() + 2).div_ceil(8); // +2 size bits, +7 to round up
+            let sz_bytes = (64 - i.leading_zeros() + 2).div_ceil(8); // +2 size bits, rounded up
             assert_eq!(
                 buf.len(),
                 usize::try_from(sz_bytes.next_power_of_two()).unwrap()
