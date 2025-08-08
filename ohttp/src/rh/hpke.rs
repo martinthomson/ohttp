@@ -579,7 +579,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
             )
         }
     };
-    trace!("Generated key pair: sk={:?} pk={:?}", sk, pk);
+    trace!("Generated key pair: sk={sk:?} pk={pk:?}");
     Ok((sk, pk))
 }
 
@@ -600,7 +600,7 @@ pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
             )
         }
     };
-    trace!("Derived key pair: sk={:?} pk={:?}", sk, pk);
+    trace!("Derived key pair: sk={sk:?} pk={pk:?}");
     Ok((sk, pk))
 }
 

@@ -496,7 +496,7 @@ impl ChunkReader {
                 if pt.is_empty() {
                     continue; // Read the next chunk
                 }
-            };
+            }
 
             return Poll::Ready(Ok(pt.len()));
         }
