@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use ::hpke as rust_hpke;
-use ::rand::thread_rng;
+use ::rand::rng;
 use log::trace;
 use rust_hpke::{
     aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, ChaCha20Poly1305},
@@ -172,7 +172,7 @@ pub struct HpkeS {
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
     pub fn new(config: Config, pk_r: &mut PublicKey, info: &[u8]) -> Res<Self> {
-        let mut csprng = thread_rng();
+        let mut csprng = rng();
 
         macro_rules! dispatch_hpkes_new {
             {
@@ -444,7 +444,7 @@ impl Deref for HpkeR {
 /// Generate a key pair for the identified KEM.
 #[allow(clippy::unnecessary_wraps)]
 pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
-    let mut csprng = thread_rng();
+    let mut csprng = rng();
     let (sk, pk) = match kem {
         Kem::X25519Sha256 => {
             let (sk, pk) = X25519HkdfSha256::gen_keypair(&mut csprng);
