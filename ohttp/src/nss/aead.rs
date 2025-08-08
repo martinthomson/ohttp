@@ -70,6 +70,7 @@ impl Mode {
 /// This is an AEAD instance that uses the
 pub struct Aead {
     mode: Mode,
+    #[allow(dead_code)]
     algorithm: AeadId,
     ctx: Context,
     nonce_base: [u8; NONCE_LEN],
