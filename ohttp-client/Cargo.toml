@@ -18,10 +18,10 @@ nss = ["ohttp/nss"]
 rust-hpke = ["ohttp/rust-hpke"]
 
 [dependencies]
-env_logger = {version = "0.10", default-features = false}
+env_logger = {version = "0.11", default-features = false}
 hex = "0.4"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
-rustls = { version = "0.21.6", features = ["dangerous_configuration"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rustls = { version = "0.23", features = [] }
 structopt = "0.3"
 tokio = { version = "1", features = ["full"] }
 
