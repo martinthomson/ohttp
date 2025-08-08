@@ -19,7 +19,6 @@ client = []
 external-sqlite = []
 gecko = ["nss", "mozbuild"]
 nss = ["bindgen"]
-pq = ["hpke-pq"]
 rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke"]
 server = []
 unsafe-print-secrets = []
@@ -37,16 +36,6 @@ rand = {version = "0.8", optional = true}
 regex = {version = "~1.11", optional = true}
 sha2 = {version = "0.9", optional = true}
 thiserror = "1"
-
-[dependencies.hpke-pq]
-package = "hpke_pq"
-version = "0.11.0"
-git = "https://github.com/bwesterb/rust-hpke"
-#branch = "xyber768d00"
-rev = "4e7e359fb7f86d4fa42e1bc38fad7f5c6b224a07"
-optional = true
-default-features = false
-features = ["std", "x25519", "xyber768d00"]
 
 [build-dependencies]
 mozbuild = {version = "0.1", optional = true}
