@@ -57,6 +57,7 @@ impl AeadEngine {
 /// A switch-hitting AEAD that uses a selected primitive.
 pub struct Aead {
     mode: Mode,
+    #[allow(dead_code, reason = "Used by stream feature")]
     algorithm: AeadId,
     engine: AeadEngine,
     nonce_base: [u8; NONCE_LEN],
