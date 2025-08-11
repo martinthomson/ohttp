@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use aead::{AeadMut, Key, NewAead, Nonce, Payload};
+use aead::{AeadMut, Key, KeyInit, Nonce, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::ChaCha20Poly1305;
 

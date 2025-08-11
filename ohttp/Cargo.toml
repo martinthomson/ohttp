@@ -19,46 +19,35 @@ client = []
 external-sqlite = []
 gecko = ["nss", "mozbuild"]
 nss = ["bindgen"]
-pq = ["hpke-pq"]
 rust-hpke = ["rand", "aead", "aes-gcm", "chacha20poly1305", "hkdf", "sha2", "hpke"]
 server = []
 stream = ["dep:futures", "dep:pin-project"]
 unsafe-print-secrets = []
 
 [dependencies]
-aead = {version = "0.4", optional = true, features = ["std"]}
-aes-gcm = {version = "0.9", optional = true}
+aead = {version = "0.5", optional = true, features = ["std"]}
+aes-gcm = {version = "0.10", optional = true}
 byteorder = "1.4"
-chacha20poly1305 = {version = "0.8", optional = true}
+chacha20poly1305 = {version = "0.10", optional = true}
 futures = {version = "0.3", optional = true}
 hex = "0.4"
-hkdf = {version = "0.11", optional = true}
-hpke = {version = "0.11.0", optional = true, default-features = false, features = ["std", "x25519"]}
+hkdf = {version = "0.12", optional = true}
+hpke = {version = "0.13", optional = true, default-features = false, features = ["std", "x25519"]}
 log = {version = "0.4", default-features = false}
 pin-project = {version = "1.1", optional = true}
-rand = {version = "0.8", optional = true}
+rand = {version = "0.9", optional = true}
 regex = {version = "~1.11", optional = true}
-sha2 = {version = "0.9", optional = true}
+sha2 = {version = "0.10", optional = true}
 thiserror = "1"
-
-[dependencies.hpke-pq]
-package = "hpke_pq"
-version = "0.11.0"
-git = "https://github.com/bwesterb/rust-hpke"
-#branch = "xyber768d00"
-rev = "4e7e359fb7f86d4fa42e1bc38fad7f5c6b224a07"
-optional = true
-default-features = false
-features = ["std", "x25519", "xyber768d00"]
 
 [build-dependencies]
 mozbuild = {version = "0.1", optional = true}
 serde = "1.0"
 serde_derive = "1.0"
-toml = "0.5"
+toml = "0.9"
 
 [build-dependencies.bindgen]
-version = "0.69"
+version = "0.72"
 default-features = false
 optional = true
 features = ["runtime"]
