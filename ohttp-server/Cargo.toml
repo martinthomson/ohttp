@@ -26,7 +26,7 @@ warp = { version = "0.3", features = ["tls"] }
 
 [dependencies.bhttp]
 path= "../bhttp"
-features = ["bhttp", "write-http"]
+features = ["http"]
 
 [dependencies.ohttp]
 path= "../ohttp"

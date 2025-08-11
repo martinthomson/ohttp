@@ -10,9 +10,10 @@
     clippy::module_name_repetitions
 )]
 
+use std::os::raw::c_char;
+
 use super::{SECStatus, SECSuccess};
 use crate::err::Res;
-use std::os::raw::c_char;
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 mod codes {

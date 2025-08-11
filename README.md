@@ -17,19 +17,11 @@ descriptive.
 
 The `bhttp` crate has the following features:
 
-- `read-bhttp` enables parsing of binary HTTP messages.  This is enabled by
-  default.
+- `http` enables parsing and generation of binary HTTP messages.
+  This is disabled by default.
 
-- `write-bhttp` enables writing of binary HTTP messages.  This is enabled by
-  default.
-
-- `read-http` enables a simple HTTP/1.1 message parser.  This parser is fairly
-  basic and is not recommended for production use.  Getting an HTTP/1.1 parser
-  right is a massive enterprise; this one only does the basics.  This is
-  disabled by default.
-
-- `write-http` enables writing of HTTP/1.1 messages.  This is disabled by
-  default.
+- `stream` enables stream processing (presently just reading)
+  of binary HTTP messages.  This is disabled by default until it stabilizes.
 
 The `ohttp` crate has the following features:
 
@@ -46,6 +38,10 @@ The `ohttp` crate has the following features:
 - `nss` selects
   [NSS](https://firefox-source-docs.mozilla.org/security/nss/index.html).  This is
   disabled by default and cannot be enabled at the same time as `rust-hpke`.
+
+- `stream` enables stream processing (presently just reading)
+  of [chunked Oblivious HTTP messages](https://datatracker.ietf.org/doc/html/draft-ietf-ohai-chunked-ohttp).
+  This is disabled by default until it stabilizes.
 
 
 ## Utilities
@@ -128,16 +124,15 @@ export NSS_DIR=$workspace/nss
 export LD_LIBRARY_PATH=$workspace/dist/Debug/lib
 ```
 
-You might need to tweak this.  On a Mac, use `DYLD_LIBRARY_PATH` instead of
-`LD_LIBRARY_PATH`.  And if you are building with `--release`, the path includes
-"Release" rather than "Debug".
+On a Mac, use `DYLD_LIBRARY_PATH` instead of `LD_LIBRARY_PATH`.
+If you are building with `--release`, the path includes "Release" rather than "Debug".
 
 Then you should be able to build and run tests:
 
 ```sh
 cd $workspace
-cargo build
-cargo test
+cargo build -F nss,client,server,http --no-default-features
+cargo test -F nss,client,server,http --no-default-features
 ```
 
 

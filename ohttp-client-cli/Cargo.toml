@@ -23,7 +23,7 @@ hex = "0.4"
 
 [dependencies.bhttp]
 path= "../bhttp"
-features = ["bhttp", "http"]
+features = ["http"]
 
 [dependencies.ohttp]
 path= "../ohttp"

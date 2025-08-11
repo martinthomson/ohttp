@@ -12,6 +12,7 @@ use rust_hpke::{
 
 use super::SymKey;
 use crate::{
+    crypto::{Decrypt, Encrypt},
     hpke::{Aead, Kdf, Kem},
     Error, Res,
 };
@@ -248,12 +249,18 @@ impl HpkeS {
     pub fn enc(&self) -> Res<Vec<u8>> {
         Ok(self.enc.clone())
     }
+}
 
-    pub fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
+impl Encrypt for HpkeS {
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>> {
         let mut buf = pt.to_owned();
         let mut tag = self.context.seal(&mut buf, aad)?;
         buf.append(&mut tag);
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -417,12 +424,18 @@ impl HpkeR {
             }
         })
     }
+}
 
-    pub fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
+impl Decrypt for HpkeR {
+    fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>> {
         let mut buf = ct.to_owned();
         let pt_len = self.context.open(&mut buf, aad)?.len();
         buf.truncate(pt_len);
         Ok(buf)
+    }
+
+    fn alg(&self) -> Aead {
+        self.config.aead()
     }
 }
 
@@ -471,6 +484,7 @@ pub fn derive_key_pair(kem: Kem, ikm: &[u8]) -> Res<(PrivateKey, PublicKey)> {
 mod test {
     use super::{generate_key_pair, Config, HpkeR, HpkeS};
     use crate::{
+        crypto::{Decrypt, Encrypt},
         hpke::{Aead, Kem},
         init,
     };
