@@ -77,7 +77,7 @@ for v in "${versions[@]}"; do
     check "clippy" cargo "+$v" clippy --tests
     check "test" cargo "+$v" test
     if [[ -n "$NSS_DIR" ]]; then
-        check "clippy(NSS)" cargo "+$v" clippy --tests --no-default-features --features nss,http
-        check "test(NSS)" cargo "+$v" test --no-default-features --features nss,http
+        check "clippy(NSS)" cargo "+$v" clippy --tests --no-default-features --features nss,http,client,server
+        check "test(NSS)" cargo "+$v" test --no-default-features --features nss,http,client,server
     fi
 done
