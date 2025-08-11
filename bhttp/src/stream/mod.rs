@@ -116,9 +116,9 @@ pub struct Body<'b, S> {
     msg: &'b mut AsyncMessage<S>,
 }
 
-impl<'b, S> Body<'b, S> {}
+impl<S> Body<'_, S> {}
 
-impl<'b, S: AsyncRead + Unpin> AsyncRead for Body<'b, S> {
+impl<S: AsyncRead + Unpin> AsyncRead for Body<'_, S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -195,7 +195,7 @@ impl<S: AsyncRead + Unpin> AsyncMessage<S> {
     /// without affecting the message.  You can then either call this
     /// method again to get any additional informational responses or
     /// call `header()` to get the message header.
-    pub fn informational(&mut self) -> impl Stream<Item = Res<InformationalResponse>> + use<'_, S> {
+    pub fn informational(&mut self) -> impl Stream<Item = Res<InformationalResponse>> + '_ {
         unfold(self, |this| async move {
             this.next_info().await.transpose().map(|info| (info, this))
         })
@@ -247,7 +247,7 @@ impl<S: AsyncRead + Unpin> AsyncMessage<S> {
     /// resulted in a conclusive outcome.
     fn read_body_len(
         cx: &mut Context<'_>,
-        mut src: &mut S,
+        src: &mut S,
         first: bool,
         read: &mut usize,
         buf: &mut [u8; 8],

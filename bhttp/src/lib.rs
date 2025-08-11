@@ -188,7 +188,10 @@ impl FieldSection {
     }
 
     /// Gets all of the values of the named field.
-    pub fn get_all<'a, 'b>(&'a self, n: &'b [u8]) -> impl Iterator<Item = &'a [u8]> + use<'a, 'b> {
+    pub fn get_all<'a, 'b>(&'a self, n: &'b [u8]) -> impl Iterator<Item = &'a [u8]> + 'b
+    where
+        'a: 'b,
+    {
         self.0.iter().filter_map(move |f| {
             if &f.name[..] == n {
                 Some(&f.value[..])

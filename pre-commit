@@ -74,10 +74,10 @@ if [[ "$1" == "all" ]]; then
     versions+=(1.82.0)
 fi
 for v in "${versions[@]}"; do
-    check "clippy" cargo "+$v" clippy --tests
-    check "test" cargo "+$v" test
+    check "clippy" cargo "+$v" clippy --tests -F stream
+    check "test" cargo "+$v" test -F stream
     if [[ -n "$NSS_DIR" ]]; then
-        check "clippy(NSS)" cargo "+$v" clippy --tests --no-default-features --features nss,http,client,server
-        check "test(NSS)" cargo "+$v" test --no-default-features --features nss,http,client,server
+        check "clippy(NSS)" cargo "+$v" clippy --tests --no-default-features --features nss,http,client,server,stream
+        check "test(NSS)" cargo "+$v" test --no-default-features --features nss,http,client,server,stream
     fi
 done
