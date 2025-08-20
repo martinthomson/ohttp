@@ -55,7 +55,7 @@ impl<R: FuturesAsyncRead + Unpin + std::marker::Send + 'static> BhttpBody<R> {
     /// # Arguments
     ///
     /// * `async_message` - The async message reader to decode body data from
-    pub fn new(mut async_message: AsyncMessage<R>) -> Self {
+    fn new(mut async_message: AsyncMessage<R>) -> Self {
         let stream = async_stream::try_stream! {
             let body = async_message.body()?;
             let body = body.compat();
