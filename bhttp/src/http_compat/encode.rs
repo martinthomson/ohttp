@@ -294,12 +294,12 @@ where
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use futures::executor::block_on;
-    use futures::StreamExt;
+    use futures::TryStreamExt as _;
     use http::{Request, Response};
     use http_body::Frame;
     use http_body_util::Full;
     use http_body_util::StreamBody;
+    use sync_async::SyncRead as _;
 
     #[test]
     fn request_to_bhttp_conversion() {
@@ -311,15 +311,10 @@ mod tests {
             .body(Full::new(Bytes::from("test body")))
             .unwrap();
 
-        let stream = BhttpEncoder::from_request(request);
-        let future = stream.fold(Vec::new(), |mut acc, item| async move {
-            if let Ok(data) = item {
-                acc.extend(data);
-            }
-            acc
-        });
-
-        let bhttp_data = block_on(future);
+        let mut reader = BhttpEncoder::from_request(request)
+            .map_err(std::io::Error::other)
+            .into_async_read();
+        let bhttp_data = reader.sync_read_to_end();
 
         // Verify that we got some data
         assert!(!bhttp_data.is_empty());
@@ -337,15 +332,11 @@ mod tests {
             .body(Full::new(Bytes::from("test response body")))
             .unwrap();
 
-        let stream = BhttpEncoder::from_response(response);
-        let future = stream.fold(Vec::new(), |mut acc, item| async move {
-            if let Ok(data) = item {
-                acc.extend(data);
-            }
-            acc
-        });
+        let mut reader = BhttpEncoder::from_response(response)
+            .map_err(std::io::Error::other)
+            .into_async_read();
 
-        let bhttp_data = block_on(future);
+        let bhttp_data = reader.sync_read_to_end();
 
         // Verify that we got some data
         assert!(!bhttp_data.is_empty());
@@ -376,15 +367,11 @@ mod tests {
             .body(body)
             .unwrap();
 
-        let stream = BhttpEncoder::from_response(response);
-        let future = stream.fold(Vec::new(), |mut acc, item| async move {
-            if let Ok(data) = item {
-                acc.extend(data);
-            }
-            acc
-        });
+        let mut reader = BhttpEncoder::from_response(response)
+            .map_err(std::io::Error::other)
+            .into_async_read();
 
-        let bhttp_data = block_on(future);
+        let bhttp_data = reader.sync_read_to_end();
 
         // Verify that we got some data
         assert!(!bhttp_data.is_empty());
@@ -421,15 +408,11 @@ mod tests {
             .unwrap();
 
         // Encode the request to BHTTP using our streaming encoder
-        let stream = BhttpEncoder::from_request(request);
-        let future = stream.fold(Vec::new(), |mut acc, item| async move {
-            if let Ok(data) = item {
-                acc.extend(data);
-            }
-            acc
-        });
+        let mut reader = BhttpEncoder::from_request(request)
+            .map_err(std::io::Error::other)
+            .into_async_read();
 
-        let bhttp_data = block_on(future);
+        let bhttp_data = reader.sync_read_to_end();
 
         compare_encoded_data_with_the_expected_example(&bhttp_data, REQUEST_EXAMPLE);
     }
