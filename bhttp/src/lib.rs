@@ -30,6 +30,54 @@ const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
 
 #[derive(Clone, Copy, Debug)]
+pub enum FramingIndicator {
+    Request(Mode),
+    Response(Mode),
+}
+
+impl FramingIndicator {
+    pub fn is_request(&self) -> bool {
+        matches!(self, Self::Request(_))
+    }
+
+    pub fn mode(&self) -> Mode {
+        match self {
+            Self::Request(mode) => *mode,
+            Self::Response(mode) => *mode,
+        }
+    }
+
+    pub fn write_bhttp(&self, w: &mut impl io::Write) -> Res<()> {
+        let code: u64 = match self {
+            Self::Request(Mode::KnownLength) => 0,
+            Self::Response(Mode::KnownLength) => 1,
+            Self::Request(Mode::IndeterminateLength) => 2,
+            Self::Response(Mode::IndeterminateLength) => 3,
+        };
+
+        write_varint(code, w)?;
+        Ok(())
+    }
+
+    pub fn read_bhttp<T, R>(r: &mut T) -> Res<Self>
+    where
+        T: BorrowMut<R> + ?Sized,
+        R: ReadSeek + ?Sized,
+    {
+        let t = read_varint(r)?.ok_or(Error::Truncated)?;
+        let request = t == 0 || t == 2;
+        let mode = Mode::try_from(t)?;
+
+        let framing_indicator = if request {
+            FramingIndicator::Request(mode)
+        } else {
+            FramingIndicator::Response(mode)
+        };
+        Ok(framing_indicator)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct StatusCode(u16);
 
 impl StatusCode {
@@ -546,12 +594,10 @@ impl ControlData {
     }
 
     #[must_use]
-    fn code(&self, mode: Mode) -> u64 {
-        match (self, mode) {
-            (Self::Request { .. }, Mode::KnownLength) => 0,
-            (Self::Response(_), Mode::KnownLength) => 1,
-            (Self::Request { .. }, Mode::IndeterminateLength) => 2,
-            (Self::Response(_), Mode::IndeterminateLength) => 3,
+    fn framing_indicator(&self, mode: Mode) -> FramingIndicator {
+        match self {
+            Self::Request { .. } => FramingIndicator::Request(mode),
+            Self::Response { .. } => FramingIndicator::Response(mode),
         }
     }
 
@@ -935,16 +981,16 @@ impl Message {
         T: BorrowMut<R> + ?Sized,
         R: ReadSeek + ?Sized,
     {
-        let t = read_varint(r)?.ok_or(Error::Truncated)?;
-        let request = t == 0 || t == 2;
-        let mode = Mode::try_from(t)?;
+        let framing_indicator = FramingIndicator::read_bhttp(r)?;
+        let is_request = framing_indicator.is_request();
+        let mode = framing_indicator.mode();
 
-        let mut control = ControlData::read_bhttp(request, r)?;
+        let mut control = ControlData::read_bhttp(is_request, r)?;
         let mut informational = Vec::new();
         while let Some(status) = control.informational() {
             let fields = FieldSection::read_bhttp(mode, r)?;
             informational.push(InformationalResponse::new(status, fields));
-            control = ControlData::read_bhttp(request, r)?;
+            control = ControlData::read_bhttp(is_request, r)?;
         }
         let hfields = FieldSection::read_bhttp(mode, r)?;
 
@@ -970,7 +1016,7 @@ impl Message {
     }
 
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
-        write_varint(self.header.control.code(mode), w)?;
+        self.header.control.framing_indicator(mode).write_bhttp(w)?;
         for info in &self.informational {
             info.write_bhttp(mode, w)?;
         }
