@@ -383,9 +383,11 @@ mod tests {
         //
         // In the original bhttp example, the scheme is https, the authority is empty, and the path
         // is `/hello.txt``. However, this is not allowed by the http crate, which requires that if
-        // a scheme is present, the authority must also be present. To make the test meaningful, the
-        // bhttp example is modified, to ensure it conforms to the HTTP URI specification:
-        //  - set the authority to `"example.com"`
+        // a scheme is present, the authority must also be present.
+        //
+        // The bhttp example has been modified as follows:
+        //  - set the authority to `"example.com"`, to ensure it conforms to the HTTP URI specification
+        //  - removed 10 bytes of padding, as described in Section 5.1 of RFC 9292
         const REQUEST_EXAMPLE: &[u8] = &[
             0x02, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0f, 0x77, 0x77,
             0x77, 0x2e, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x0a,
@@ -397,8 +399,7 @@ mod tests {
             0x2e, 0x32, 0x2e, 0x33, 0x04, 0x68, 0x6f, 0x73, 0x74, 0x0f, 0x77, 0x77, 0x77, 0x2e,
             0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x0f, 0x61, 0x63,
             0x63, 0x65, 0x70, 0x74, 0x2d, 0x6c, 0x61, 0x6e, 0x67, 0x75, 0x61, 0x67, 0x65, 0x06,
-            0x65, 0x6e, 0x2c, 0x20, 0x6d, 0x69, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00,
+            0x65, 0x6e, 0x2c, 0x20, 0x6d, 0x69, 0x00, 0x00, 0x00,
         ];
 
         // Create the HTTP request as specified in the RFC
@@ -421,23 +422,6 @@ mod tests {
 
         let bhttp_data = reader.sync_read_to_end();
 
-        compare_encoded_data_with_the_expected_example(&bhttp_data, REQUEST_EXAMPLE);
-    }
-
-    fn compare_encoded_data_with_the_expected_example(generated: &[u8], expected: &[u8]) {
-        // Compare the encoded data with the expected example
-        // BHTTP allows trailing padding, so we need to check if our data matches
-        // the expected data, ignoring any trailing zeros in the expected data
-
-        // Find where the actual data ends (ignoring trailing zeros)
-        let expected_end = expected.iter().rposition(|&x| x != 0).map_or(0, |i| i + 1);
-
-        let generated_end = generated.iter().rposition(|&x| x != 0).map_or(0, |i| i + 1);
-
-        // Check that the first part matches exactly
-        assert_eq!(
-            hex::encode(&generated[..generated_end]),
-            hex::encode(&expected[..expected_end])
-        );
+        assert_eq!(hex::encode(&bhttp_data), hex::encode(&REQUEST_EXAMPLE));
     }
 }
