@@ -16,6 +16,9 @@ mod rw;
 #[cfg(feature = "stream")]
 pub mod stream;
 
+#[cfg(feature = "http-compat")]
+pub mod http_compat;
+
 pub use err::Error;
 use err::Res;
 #[cfg(feature = "http")]
