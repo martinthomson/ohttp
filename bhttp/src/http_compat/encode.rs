@@ -12,18 +12,17 @@ use futures_core::stream::Stream as FuturesStream;
 use http::{HeaderMap, Request, Response};
 use http_body::Body as HttpBody;
 
-/// Helper function to build a FieldSection from HTTP headers
+/// Helper function to build a [`FieldSection`] from HTTP headers
 impl TryFrom<&HeaderMap> for FieldSection {
     type Error = Error;
 
     fn try_from(headers: &HeaderMap) -> Res<FieldSection> {
-        let mut fields = Vec::new();
-
-        for (name, value) in headers {
-            let name_bytes = name.as_str().as_bytes().to_vec();
-            let value_bytes = value.as_bytes().to_vec();
-            fields.push(Field::new(name_bytes, value_bytes));
-        }
+        let fields = headers
+            .iter()
+            .map(|(name, value)| {
+                Field::new(name.as_str().as_bytes().to_vec(), value.as_bytes().to_vec())
+            })
+            .collect::<Vec<_>>();
 
         Ok(FieldSection(fields))
     }
@@ -33,15 +32,17 @@ impl TryFrom<&FieldSection> for HeaderMap {
     type Error = Error;
 
     fn try_from(field_section: &FieldSection) -> Res<HeaderMap> {
-        let mut headers = HeaderMap::new();
-
-        for field in field_section.iter() {
-            let name =
-                http::header::HeaderName::from_bytes(field.name()).map_err(http::Error::from)?;
-            let value =
-                http::header::HeaderValue::from_bytes(field.value()).map_err(http::Error::from)?;
-            headers.append(name, value);
-        }
+        let headers = field_section
+            .iter()
+            .map(|field| {
+                Ok((
+                    http::header::HeaderName::from_bytes(field.name())
+                        .map_err(http::Error::from)?,
+                    http::header::HeaderValue::from_bytes(field.value())
+                        .map_err(http::Error::from)?,
+                ))
+            })
+            .collect::<Res<HeaderMap<_>>>()?;
 
         Ok(headers)
     }
