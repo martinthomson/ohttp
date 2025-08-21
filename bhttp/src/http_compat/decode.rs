@@ -193,90 +193,99 @@ impl TryFrom<crate::Header> for HttpMessageParts {
     /// Either HTTP request parts or response parts, depending on the control data,
     /// or an error if parsing fails.
     fn try_from(header: crate::Header) -> Res<Self> {
+        if header.control().is_request() {
+            Ok(HttpMessageParts::Request(request::Parts::try_from(header)?))
+        } else {
+            Ok(HttpMessageParts::Response(response::Parts::try_from(
+                header,
+            )?))
+        }
+    }
+}
+
+impl TryFrom<crate::Header> for request::Parts {
+    type Error = Error;
+
+    fn try_from(header: crate::Header) -> Res<Self> {
         let control_data = header.control();
 
-        if control_data.is_request() {
-            // Build the HTTP request parts
-            let mut builder = request::Builder::new();
+        // Build the HTTP request parts
+        let mut builder = request::Builder::new();
 
-            // Set method
-            if let Some(method) = control_data.method() {
-                let method_str = std::str::from_utf8(method)?;
-                builder = builder.method(method_str);
+        // Set method
+        if let Some(method) = control_data.method() {
+            builder = builder.method(method);
+        }
+
+        // Convert field section to headers
+        let headers = HeaderMap::try_from(&header.fields)?;
+
+        // Set URI
+        let uri = {
+            let mut uri_builder = Uri::builder();
+
+            if let Some(scheme) = control_data.scheme() {
+                uri_builder = uri_builder.scheme(scheme);
             }
 
-            // Convert field section to headers
-            let headers = HeaderMap::try_from(&header.fields)?;
-
-            // Set URI
-            let uri = {
-                let mut uri_builder = Uri::builder();
-
-                if let Some(scheme) = control_data.scheme() {
-                    uri_builder = uri_builder.scheme(scheme);
+            // Handle authority field
+            match control_data.authority() {
+                Some(authority_bytes) if !authority_bytes.is_empty() => {
+                    uri_builder = uri_builder.authority(std::str::from_utf8(authority_bytes)?);
                 }
-
-                // Handle authority field
-                match control_data.authority() {
-                    Some(authority_bytes) if !authority_bytes.is_empty() => {
-                        uri_builder = uri_builder.authority(std::str::from_utf8(authority_bytes)?);
-                    }
-                    _ => {
-                        // The http::Uri does not allow an absent authority when the scheme is present, but
-                        // this is permitted in bhttp and report an InvalidUri(InvalidFormat) error. To
-                        // reconcile this difference, we will attempt to retrieve the authority from the
-                        // request headers.
-                        if control_data.scheme().is_some() {
-                            if let Some(host_value) = headers.get("host") {
-                                uri_builder = uri_builder.authority(host_value.to_str()?);
-                            }
+                _ => {
+                    // The http::Uri does not allow an absent authority when the scheme is present, but
+                    // this is permitted in bhttp and report an InvalidUri(InvalidFormat) error. To
+                    // reconcile this difference, we will attempt to retrieve the authority from the
+                    // request headers.
+                    if control_data.scheme().is_some() {
+                        if let Some(host_value) = headers.get("host") {
+                            uri_builder = uri_builder.authority(host_value.to_str()?);
                         }
                     }
                 }
-
-                if let Some(path) = control_data.path() {
-                    uri_builder = uri_builder.path_and_query(std::str::from_utf8(path)?);
-                }
-
-                uri_builder.build()?
-            };
-            builder = builder.uri(uri);
-
-            // Apply headers to builder
-            let mut builder = builder;
-            for (name, value) in headers {
-                if let Some(name) = name {
-                    builder = builder.header(name, value);
-                }
             }
 
-            let parts = builder.body(())?.into_parts().0;
-
-            Ok(HttpMessageParts::Request(parts))
-        } else {
-            // Build the HTTP response parts
-            let mut builder = response::Builder::new();
-
-            // Set status code
-            if let Some(status) = control_data.status() {
-                builder = builder.status(status.code());
+            if let Some(path) = control_data.path() {
+                uri_builder = uri_builder.path_and_query(std::str::from_utf8(path)?);
             }
 
-            // Convert field section to headers
-            let headers = HeaderMap::try_from(&header.fields)?;
+            uri_builder.build()?
+        };
+        builder = builder.uri(uri);
 
-            // Apply headers to builder
-            let mut builder = builder;
-            for (name, value) in headers {
-                if let Some(name) = name {
-                    builder = builder.header(name, value);
-                }
+        // Set headers
+        for (name, value) in headers {
+            if let Some(name) = name {
+                builder = builder.header(name, value);
             }
-
-            let parts = builder.body(())?.into_parts().0;
-
-            Ok(HttpMessageParts::Response(parts))
         }
+
+        Ok(builder.body(())?.into_parts().0)
+    }
+}
+
+impl TryFrom<crate::Header> for response::Parts {
+    type Error = Error;
+
+    fn try_from(header: crate::Header) -> Res<Self> {
+        let control_data = header.control();
+        let mut builder = response::Builder::new();
+
+        // Set status code
+        if let Some(status) = control_data.status() {
+            builder = builder.status(status.code());
+        }
+
+        // Set headers
+        let headers = HeaderMap::try_from(&header.fields)?;
+        for (name, value) in headers {
+            if let Some(name) = name {
+                builder = builder.header(name, value);
+            }
+        }
+
+        Ok(builder.body(())?.into_parts().0)
     }
 }
 
