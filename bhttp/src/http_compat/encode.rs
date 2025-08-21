@@ -49,17 +49,17 @@ impl TryFrom<&FieldSection> for HeaderMap {
 
 /// Enum to wrap either an HTTP Request or Response for unified BHTTP encoding
 #[derive(Debug)]
-enum HttpRequestResponse<T> {
+enum HttpMessage<T> {
     Request(Request<T>),
     Response(Response<T>),
 }
 
-impl<T> HttpRequestResponse<T> {
+impl<T> HttpMessage<T> {
     /// Generate BHTTP headers field section from the wrapped request or response
     fn bhttp_headers(&self) -> Res<FieldSection> {
         let http_headers = match self {
-            HttpRequestResponse::Request(req) => req.headers(),
-            HttpRequestResponse::Response(res) => res.headers(),
+            Self::Request(req) => req.headers(),
+            Self::Response(res) => res.headers(),
         };
 
         FieldSection::try_from(http_headers)
@@ -68,7 +68,7 @@ impl<T> HttpRequestResponse<T> {
     /// Generate control data from the wrapped request or response for BHTTP encoding
     fn bhttp_control_data(&self) -> Res<ControlData> {
         match self {
-            HttpRequestResponse::Request(req) => {
+            Self::Request(req) => {
                 let method = req.method().as_str().as_bytes().to_vec();
                 let uri = req.uri();
 
@@ -89,7 +89,7 @@ impl<T> HttpRequestResponse<T> {
                     path,
                 })
             }
-            HttpRequestResponse::Response(res) => {
+            Self::Response(res) => {
                 let status_code = StatusCode::try_from(res.status().as_u16())
                     .map_err(|_| Error::InvalidStatus)?;
                 Ok(ControlData::Response(status_code))
@@ -100,8 +100,8 @@ impl<T> HttpRequestResponse<T> {
     /// Get a mutable reference to the body of the wrapped request or response
     fn body_mut(&mut self) -> &mut T {
         match self {
-            HttpRequestResponse::Request(req) => req.body_mut(),
-            HttpRequestResponse::Response(res) => res.body_mut(),
+            Self::Request(req) => req.body_mut(),
+            Self::Response(res) => res.body_mut(),
         }
     }
 }
@@ -127,12 +127,12 @@ impl<T> HttpRequestResponse<T> {
 ///   not assume that Frame encodings from the http crate will remain the same
 ///   after encoding and decoding.
 pub struct BhttpEncoder<T> {
-    state: HttpEncodeState,
-    message: HttpRequestResponse<T>,
+    state: EncodeState,
+    message: HttpMessage<T>,
 }
 
 /// The internal state of the BHTTP encoder
-enum HttpEncodeState {
+enum EncodeState {
     /// Initial state, ready to encode control data and headers
     ControlAndHeaders,
     /// Streaming body chunks
@@ -149,8 +149,8 @@ impl<T> BhttpEncoder<T> {
     /// * `request` - The HTTP request to convert to BHTTP format
     pub fn from_request(request: Request<T>) -> Self {
         Self {
-            state: HttpEncodeState::ControlAndHeaders,
-            message: HttpRequestResponse::Request(request),
+            state: EncodeState::ControlAndHeaders,
+            message: HttpMessage::Request(request),
         }
     }
 
@@ -161,8 +161,8 @@ impl<T> BhttpEncoder<T> {
     /// * `response` - The HTTP response to convert to BHTTP format
     pub fn from_response(response: Response<T>) -> Self {
         Self {
-            state: HttpEncodeState::ControlAndHeaders,
-            message: HttpRequestResponse::Response(response),
+            state: EncodeState::ControlAndHeaders,
+            message: HttpMessage::Response(response),
         }
     }
 }
@@ -181,6 +181,10 @@ where
     /// 2. Then, it streams the body data in chunks
     /// 3. Finally, it handles trailers if present
     ///
+    /// For those who needs a [futures::prelude::AsyncRead] or
+    /// [futures::stream::IntoAsyncRead], see
+    /// [`into_async_read`](futures::stream::TryStreamExt::into_async_read).
+    ///
     /// # Arguments
     ///
     /// * `cx` - The task context for polling
@@ -195,7 +199,7 @@ where
         let this = self.get_mut();
 
         match this.state {
-            HttpEncodeState::ControlAndHeaders => {
+            EncodeState::ControlAndHeaders => {
                 let mut buf = Vec::new();
 
                 let control_data = this.message.bhttp_control_data()?;
@@ -220,10 +224,10 @@ where
                 field_section.write_bhttp(Mode::IndeterminateLength, &mut buf)?;
 
                 // 5. Change to next state
-                this.state = HttpEncodeState::BodyChunk;
+                this.state = EncodeState::BodyChunk;
                 Poll::Ready(Some(Ok(buf)))
             }
-            HttpEncodeState::BodyChunk => {
+            EncodeState::BodyChunk => {
                 // Poll the body for more data
                 let body = this.message.body_mut();
                 match Pin::new(body).poll_frame(cx) {
@@ -244,11 +248,11 @@ where
                             field_section.write_bhttp(Mode::IndeterminateLength, &mut buf)?;
 
                             // Switch to Done state since we have written the trailers
-                            this.state = HttpEncodeState::Done;
+                            this.state = EncodeState::Done;
                             Poll::Ready(Some(Ok(buf)))
                         } else {
                             // For unknown frame types, report an invalid data error.
-                            this.state = HttpEncodeState::Done;
+                            this.state = EncodeState::Done;
                             Poll::Ready(Some(Err(Error::UnknownHttpBodyFrameType)))
                         }
                     }
@@ -259,13 +263,13 @@ where
                         // End of body, write zero-length chunk to indicate end
                         let mut end_chunk = Vec::new();
                         write_len(0, &mut end_chunk)?;
-                        this.state = HttpEncodeState::Done;
+                        this.state = EncodeState::Done;
                         Poll::Ready(Some(Ok(end_chunk)))
                     }
                     Poll::Pending => Poll::Pending,
                 }
             }
-            HttpEncodeState::Done => Poll::Ready(None),
+            EncodeState::Done => Poll::Ready(None),
         }
     }
 }

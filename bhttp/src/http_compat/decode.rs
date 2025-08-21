@@ -21,7 +21,7 @@ use crate::{
 /// request and response types uniformly before constructing the final
 /// HTTP structures.
 #[derive(Debug)]
-enum HttpRequestOrResponseParts {
+enum HttpMessageParts {
     /// An HTTP request parts
     Request(request::Parts),
     /// An HTTP response parts
@@ -32,7 +32,7 @@ enum HttpRequestOrResponseParts {
 ///
 /// This is the final result of the decoding process, containing either
 /// a fully constructed HTTP request or response with a streaming body.
-pub enum HttpRequestOrResponse<R> {
+pub enum HttpMessage<R> {
     /// An HTTP request with a streaming BHTTP body
     Request(Request<BhttpBody<R>>),
     /// An HTTP response with a streaming BHTTP body
@@ -155,26 +155,28 @@ where
     ///
     /// # Returns
     ///
-    /// A result containing either an HTTP request or response with a streaming body,
+    /// A decode result which can be convert to either an HTTP request or response with a streaming body,
     /// or an error if decoding fails.
-    pub async fn decode_message(self) -> Res<HttpRequestOrResponse<R>> {
+    pub async fn decode_message(self) -> Res<HttpMessage<R>> {
         let mut async_message = Message::async_read(self.reader);
 
         let header = async_message.header().await?;
-        let parts = HttpRequestOrResponseParts::try_from(header)?;
+        let parts = HttpMessageParts::try_from(header)?;
 
         match parts {
-            HttpRequestOrResponseParts::Request(parts) => Ok(HttpRequestOrResponse::Request(
-                Request::from_parts(parts, BhttpBody::new(async_message)),
-            )),
-            HttpRequestOrResponseParts::Response(parts) => Ok(HttpRequestOrResponse::Response(
-                Response::from_parts(parts, BhttpBody::new(async_message)),
-            )),
+            HttpMessageParts::Request(parts) => Ok(HttpMessage::Request(Request::from_parts(
+                parts,
+                BhttpBody::new(async_message),
+            ))),
+            HttpMessageParts::Response(parts) => Ok(HttpMessage::Response(Response::from_parts(
+                parts,
+                BhttpBody::new(async_message),
+            ))),
         }
     }
 }
 
-impl TryFrom<crate::Header> for HttpRequestOrResponseParts {
+impl TryFrom<crate::Header> for HttpMessageParts {
     type Error = Error;
 
     /// Convert a BHTTP header into either HTTP request or response parts
@@ -250,7 +252,7 @@ impl TryFrom<crate::Header> for HttpRequestOrResponseParts {
 
             let parts = builder.body(())?.into_parts().0;
 
-            Ok(HttpRequestOrResponseParts::Request(parts))
+            Ok(HttpMessageParts::Request(parts))
         } else {
             // Build the HTTP response parts
             let mut builder = response::Builder::new();
@@ -273,7 +275,7 @@ impl TryFrom<crate::Header> for HttpRequestOrResponseParts {
 
             let parts = builder.body(())?.into_parts().0;
 
-            Ok(HttpRequestOrResponseParts::Response(parts))
+            Ok(HttpMessageParts::Response(parts))
         }
     }
 }
@@ -306,7 +308,7 @@ mod tests {
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
         match result {
-            HttpRequestOrResponse::Request(request) => {
+            HttpMessage::Request(request) => {
                 // Check method
                 assert_eq!(request.method(), http::Method::GET);
 
@@ -326,7 +328,7 @@ mod tests {
                 let body_data = block_on(request.into_body().collect()).unwrap().to_bytes();
                 assert!(body_data.is_empty());
             }
-            HttpRequestOrResponse::Response(_) => {
+            HttpMessage::Response(_) => {
                 panic!("Expected a request, but got a response");
             }
         }
@@ -354,7 +356,7 @@ mod tests {
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
         match result {
-            HttpRequestOrResponse::Request(request) => {
+            HttpMessage::Request(request) => {
                 // Check method
                 assert_eq!(request.method(), http::Method::GET);
 
@@ -374,7 +376,7 @@ mod tests {
                 let body_data = block_on(request.into_body().collect()).unwrap().to_bytes();
                 assert!(body_data.is_empty());
             }
-            HttpRequestOrResponse::Response(_) => {
+            HttpMessage::Response(_) => {
                 panic!("Expected a request, but got a response");
             }
         }
@@ -418,7 +420,7 @@ mod tests {
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
         match result {
-            HttpRequestOrResponse::Response(response) => {
+            HttpMessage::Response(response) => {
                 // Check status
                 assert_eq!(response.status(), http::StatusCode::OK);
 
@@ -447,7 +449,7 @@ mod tests {
                     "Hello World! My content includes a trailing CRLF.\r\n"
                 );
             }
-            HttpRequestOrResponse::Request(_) => {
+            HttpMessage::Request(_) => {
                 panic!("Expected a response, but got a request");
             }
         }
@@ -468,7 +470,7 @@ mod tests {
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
         match result {
-            HttpRequestOrResponse::Response(response) => {
+            HttpMessage::Response(response) => {
                 // Check status
                 assert_eq!(response.status(), http::StatusCode::OK);
 
@@ -493,7 +495,7 @@ mod tests {
                     "This content contains CRLF.\r\n"
                 );
             }
-            HttpRequestOrResponse::Request(_) => {
+            HttpMessage::Request(_) => {
                 panic!("Expected a response, but got a request");
             }
         }
