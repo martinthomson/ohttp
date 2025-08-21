@@ -136,8 +136,10 @@ pub struct BhttpEncoder<T> {
 enum EncodeState {
     /// Initial state, ready to encode control data and headers
     ControlAndHeaders,
-    /// Streaming body chunks
-    BodyChunk,
+    /// Streaming body chunks and collecting trailers
+    BodyChunk {
+        collected_trailers: Option<HeaderMap>,
+    },
     /// All data has been encoded
     Done,
 }
@@ -199,7 +201,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        match this.state {
+        match &mut this.state {
             EncodeState::ControlAndHeaders => {
                 let mut buf = Vec::new();
 
@@ -225,47 +227,61 @@ where
                 field_section.write_bhttp(Mode::IndeterminateLength, &mut buf)?;
 
                 // 5. Change to next state
-                this.state = EncodeState::BodyChunk;
+                this.state = EncodeState::BodyChunk {
+                    collected_trailers: None,
+                };
                 Poll::Ready(Some(Ok(buf)))
             }
-            EncodeState::BodyChunk => {
+            EncodeState::BodyChunk { collected_trailers } => {
                 // Poll the body for more data
                 let body = this.message.body_mut();
                 match Pin::new(body).poll_frame(cx) {
                     Poll::Ready(Some(Ok(frame))) => {
-                        if let Some(data) = frame.data_ref() {
-                            // Is a data frame
-                            let mut chunk_data = Vec::new();
-                            write_vec(&data, &mut chunk_data)?;
-                            Poll::Ready(Some(Ok(chunk_data)))
-                        } else if let Some(trailers) = frame.trailers_ref() {
-                            // Is a trailers frame
-                            let mut buf = Vec::new();
-                            // First, we need to write zero-length chunk to indicate end, since we always using Mode::IndeterminateLength
-                            write_len(0, &mut buf)?;
-
-                            // Then, write the trailer field section with indeterminate length mode
-                            let field_section = FieldSection::try_from(trailers)?;
-                            field_section.write_bhttp(Mode::IndeterminateLength, &mut buf)?;
-
-                            // Switch to Done state since we have written the trailers
-                            this.state = EncodeState::Done;
-                            Poll::Ready(Some(Ok(buf)))
-                        } else {
-                            // For unknown frame types, report an invalid data error.
-                            this.state = EncodeState::Done;
-                            Poll::Ready(Some(Err(Error::UnknownHttpBodyFrameType)))
+                        match frame.into_data() {
+                            Ok(data) => {
+                                // Is a data frame
+                                let mut chunk_data = Vec::new();
+                                write_vec(&data, &mut chunk_data)?;
+                                Poll::Ready(Some(Ok(chunk_data)))
+                            }
+                            Err(frame) => {
+                                if let Ok(trailers) = frame.into_trailers() {
+                                    // Is a trailers frame
+                                    if let Some(current) = collected_trailers {
+                                        current.extend(trailers);
+                                    } else {
+                                        *collected_trailers = Some(trailers);
+                                    }
+                                    Poll::Pending
+                                } else {
+                                    // For unknown frame types, report an invalid data error.
+                                    this.state = EncodeState::Done;
+                                    Poll::Ready(Some(Err(Error::UnknownHttpBodyFrameType)))
+                                }
+                            }
                         }
                     }
                     Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(Error::Io(
                         std::io::Error::new(std::io::ErrorKind::Other, e),
                     )))),
                     Poll::Ready(None) => {
-                        // End of body, write zero-length chunk to indicate end
-                        let mut end_chunk = Vec::new();
-                        write_len(0, &mut end_chunk)?;
+                        // End of body, write zero-length chunk to indicate end, since we always using Mode::IndeterminateLength
+                        let mut buf = Vec::new();
+                        write_len(0, &mut buf)?;
+
+                        // Then, write the trailer field section with indeterminate length mode
+                        let field_section =
+                            if let Some(collected_trailers) = collected_trailers.as_ref() {
+                                FieldSection::try_from(collected_trailers)?
+                            } else {
+                                FieldSection(vec![])
+                            };
+                        field_section.write_bhttp(Mode::IndeterminateLength, &mut buf)?;
+
+                        // Switch to Done state since we have written the trailers
                         this.state = EncodeState::Done;
-                        Poll::Ready(Some(Ok(end_chunk)))
+
+                        Poll::Ready(Some(Ok(buf)))
                     }
                     Poll::Pending => Poll::Pending,
                 }
