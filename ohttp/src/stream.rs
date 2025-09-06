@@ -28,6 +28,7 @@ pub(crate) const LABEL_RESPONSE: &[u8] = b"message/bhttp chunked response";
 const MAX_CHUNK_PLAINTEXT: usize = 1 << 14;
 const CHUNK_AAD: &[u8] = b"";
 const FINAL_CHUNK_AAD: &[u8] = b"final";
+const MAX_ENTROPY_LEN: usize = 32;
 
 #[allow(clippy::unnecessary_wraps)]
 fn ioerror<T, E>(e: E) -> Poll<IoResult<T>>
@@ -241,7 +242,7 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: Default::default(),
                 read: 0,
             },
         })
@@ -265,7 +266,7 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: Default::default(),
                 read: 0,
             },
         })
@@ -824,7 +825,7 @@ enum ClientResponseState {
     Header {
         enc: Vec<u8>,
         secret: SymKey,
-        nonce: [u8; 16],
+        nonce: [u8; MAX_ENTROPY_LEN],
         read: usize,
     },
     Body {
