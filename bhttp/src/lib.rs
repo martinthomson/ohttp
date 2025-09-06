@@ -1,4 +1,4 @@
-#![deny(warnings, clippy::pedantic)]
+#![deny(warnings, clippy::pedantic, clippy::redundant_test_prefix)]
 #![allow(clippy::missing_errors_doc)] // Too lazy to document these.
 
 use std::{
@@ -40,14 +40,15 @@ pub enum FramingIndicator {
 }
 
 impl FramingIndicator {
+    #[must_use]
     pub fn is_request(&self) -> bool {
         matches!(self, Self::Request(_))
     }
 
+    #[must_use]
     pub fn mode(&self) -> Mode {
         match self {
-            Self::Request(mode) => *mode,
-            Self::Response(mode) => *mode,
+            Self::Request(mode) | Self::Response(mode) => *mode,
         }
     }
 
