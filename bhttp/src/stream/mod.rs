@@ -157,6 +157,10 @@ pub struct AsyncMessage<S> {
 unsafe impl<S: Send> Send for AsyncMessage<S> {}
 
 impl<S: AsyncRead + Unpin> AsyncMessage<S> {
+    pub fn reader_ref(&self) -> &S {
+        &self.src
+    }
+
     async fn next_info(&mut self) -> Res<Option<InformationalResponse>> {
         let request = if matches!(self.state, AsyncMessageState::Init) {
             // Read control data ...

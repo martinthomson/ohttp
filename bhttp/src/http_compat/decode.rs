@@ -157,20 +157,40 @@ where
     ///
     /// A decode result which can be convert to either an HTTP request or response with a streaming body,
     /// or an error if decoding fails.
-    pub async fn decode_message(self) -> Res<HttpMessage<R>> {
+    pub async fn decode_message(self) -> Res<DecodeResult<R>> {
         let mut async_message = Message::async_read(self.reader);
 
         let header = async_message.header().await?;
         let parts = HttpMessageParts::try_from(header)?;
 
-        match parts {
+        Ok(DecodeResult {
+            async_message,
+            parts,
+        })
+    }
+}
+
+pub struct DecodeResult<R> {
+    async_message: AsyncMessage<R>,
+    parts: HttpMessageParts,
+}
+
+impl<R: FuturesAsyncRead + Unpin> DecodeResult<R> {
+    pub fn reader_ref(&self) -> &R {
+        self.async_message.reader_ref()
+    }
+}
+
+impl<R: FuturesAsyncRead + Unpin + Send + 'static> DecodeResult<R> {
+    pub fn into_full_message(self) -> Res<HttpMessage<R>> {
+        match self.parts {
             HttpMessageParts::Request(parts) => Ok(HttpMessage::Request(Request::from_parts(
                 parts,
-                BhttpBody::new(async_message),
+                BhttpBody::new(self.async_message),
             ))),
             HttpMessageParts::Response(parts) => Ok(HttpMessage::Response(Response::from_parts(
                 parts,
-                BhttpBody::new(async_message),
+                BhttpBody::new(self.async_message),
             ))),
         }
     }
@@ -316,7 +336,7 @@ mod tests {
         let decoder = BhttpDecoder::new(cursor);
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
-        match result {
+        match result.into_full_message().unwrap() {
             HttpMessage::Request(request) => {
                 // Check method
                 assert_eq!(request.method(), http::Method::GET);
@@ -364,7 +384,7 @@ mod tests {
         let decoder = BhttpDecoder::new(cursor);
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
-        match result {
+        match result.into_full_message().unwrap() {
             HttpMessage::Request(request) => {
                 // Check method
                 assert_eq!(request.method(), http::Method::GET);
@@ -428,7 +448,7 @@ mod tests {
         let decoder = BhttpDecoder::new(cursor);
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
-        match result {
+        match result.into_full_message().unwrap() {
             HttpMessage::Response(response) => {
                 // Check status
                 assert_eq!(response.status(), http::StatusCode::OK);
@@ -478,7 +498,7 @@ mod tests {
         let decoder = BhttpDecoder::new(cursor);
         let result = block_on(decoder.decode_message()).expect("Failed to decode message");
 
-        match result {
+        match result.into_full_message().unwrap() {
             HttpMessage::Response(response) => {
                 // Check status
                 assert_eq!(response.status(), http::StatusCode::OK);
