@@ -312,9 +312,18 @@ enum ChunkReader {
         offset: usize,
     },
     Data {
+        /// The buffer to hold the cypertext
         buf: Vec<u8>,
+        /// The offset into the buffer where the next cypertext should be written to
         offset: usize,
+        /// The expected length of the cypertext
         length: usize,
+    },
+    PlaintextRemaining {
+        /// The buffer to hold the plaintext
+        pt: Vec<u8>,
+        /// The offset of the plaintext to read from
+        offset: usize,
     },
     Done,
 }
@@ -337,6 +346,10 @@ impl ChunkReader {
             offset: 0,
             length,
         }
+    }
+
+    fn plaintext_remaining(pt: Vec<u8>, offset: usize) -> Self {
+        Self::PlaintextRemaining { pt, offset }
     }
 
     fn read_fixed<S: AsyncRead>(
@@ -455,7 +468,7 @@ impl ChunkReader {
                         Ok(pt) => pt,
                         Err(e) => return Some(ioerror(e)),
                     };
-                    output[..pt.len()].copy_from_slice(&pt);
+                    output[..pt.len()].copy_from_slice(&pt); // It is safe to copy since pt.len() is less than *length
                     *self = Self::length();
                     Some(Poll::Ready(Ok(pt.len())))
                 } else {
@@ -486,6 +499,22 @@ impl ChunkReader {
             if let Some(res) = self.read_into_output(src.as_mut(), cx, cipher, output) {
                 return res;
             }
+
+            // If we have remaining plaintext data, copy it into the output buffer.
+            if let Self::PlaintextRemaining { pt, offset } = self {
+                if pt.len() <= *offset {
+                    // No more plaintext
+                    *self = Self::length();
+                    continue; // Read the next chunk
+                } else {
+                    let copy_len = std::cmp::min(pt.len() - *offset, output.len());
+                    let dst = &mut output[..copy_len];
+                    let src = &pt[(*offset)..][..copy_len];
+                    dst.copy_from_slice(src);
+                    *offset += dst.len(); // update the offset
+                    return Poll::Ready(Ok(dst.len()));
+                }
+            };
 
             let Self::Data {
                 buf,
@@ -527,18 +556,25 @@ impl ChunkReader {
 
             let aad = if last { FINAL_CHUNK_AAD } else { CHUNK_AAD };
             let pt = cipher.open(aad, buf).map_err(IoError::other)?;
-            output[..pt.len()].copy_from_slice(&pt);
 
             if last {
                 *self = Self::Done;
-            } else {
+                return Poll::Ready(Ok(0));
+            } else if pt.is_empty() {
                 *self = Self::length();
-                if pt.is_empty() {
-                    continue; // Read the next chunk
-                }
+                continue; // Read the next chunk
+            } else if pt.len() > output.len() {
+                let src = &pt[..(output.len())];
+                output[..].copy_from_slice(src);
+                // keep the remain bytes in plaintext
+                *self = Self::plaintext_remaining(pt, output.len());
+                return Poll::Ready(Ok(output.len()));
+            } else {
+                output[..pt.len()].copy_from_slice(&pt);
+                // There is no more bytes in plaintext
+                *self = Self::length();
+                return Poll::Ready(Ok(pt.len()));
             }
-
-            return Poll::Ready(Ok(pt.len()));
         }
 
         Poll::Ready(Ok(0))
@@ -899,6 +935,37 @@ mod test {
         let response_buf = client_response.sync_read_to_end();
         assert_eq!(response_buf, RESPONSE);
         trace!("Response: {}", hex::encode(response_buf));
+    }
+
+    #[test]
+    fn long_request() {
+        init();
+
+        // A long request.
+        const LONG_REQUEST: &[u8] = &[0u8; 4096];
+
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config));
+
+        // The client sends a request.
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let mut client_request = client.encapsulate_stream(request_write).unwrap();
+        client_request
+            .write_all(LONG_REQUEST)
+            .sync_resolve()
+            .unwrap();
+        client_request.close().sync_resolve().unwrap();
+
+        trace!("Request: {}", hex::encode(LONG_REQUEST));
+        let enc_request = request_read.sync_read_to_end();
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request));
+
+        // The server receives a request.
+        let mut server_request = server.decapsulate_stream(&enc_request[..]);
+        assert_eq!(server_request.sync_read_to_end(), LONG_REQUEST);
     }
 
     /// Run the `request_response` test, but do it with streams that are one byte apiece
