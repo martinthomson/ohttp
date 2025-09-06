@@ -121,6 +121,7 @@ impl Decrypt for Aead {
         res
     }
 
+    #[allow(unused)]
     fn alg(&self) -> AeadId {
         self.algorithm
     }
@@ -136,6 +137,7 @@ impl Encrypt for Aead {
         Ok(ct)
     }
 
+    #[allow(unused)]
     fn alg(&self) -> AeadId {
         self.algorithm
     }

@@ -39,9 +39,9 @@ pub enum HttpMessage<R> {
     Response(Response<BhttpBody<R>>),
 }
 
-/// A body type that wraps an AsyncRead and progressively decodes BHTTP body data
+/// A body type that wraps an [`futures::AsyncRead`] and progressively decodes BHTTP body data
 ///
-/// This struct implements the [http_body::Body] trait, providing a streaming
+/// This struct implements the [`http_body::Body`] trait, providing a streaming
 /// interface for reading the body data from a BHTTP message. It handles both
 /// regular body data and trailers.
 pub struct BhttpBody<R> {
@@ -115,7 +115,7 @@ where
 /// `http::Request`/`http::Response` structures through asynchronous streaming.
 /// Both **Known-Length Message** and **Indeterminate-Length Messages** are supported.
 ///
-/// This decoder works with any type that implements [futures::AsyncRead],
+/// This decoder works with any type that implements [`futures::AsyncRead`],
 /// making it suitable for various input sources like network streams or files.
 ///
 /// # Important Notes
@@ -288,7 +288,7 @@ mod tests {
     use http_body_util::BodyExt;
 
     #[test]
-    fn test_decode_rfc9292_request_example_known_length() {
+    fn decode_rfc9292_request_example_known_length() {
         // Example from Section 5.1 of RFC 9292 - Known-Length Binary Encoding of Request
         const REQUEST_EXAMPLE: &[u8] = &[
             0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x00, 0x0a, 0x2f,
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_rfc9292_request_example_indeterminate_length() {
+    fn decode_rfc9292_request_example_indeterminate_length() {
         // Example from Section 5.1 of RFC 9292 - Indeterminate-Length Binary Encoding of Request
         const REQUEST_EXAMPLE: &[u8] = &[
             0x02, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x00, 0x0a, 0x2f,
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_rfc9292_response_example_inculding_informational_responses() {
+    fn decode_rfc9292_response_example_inculding_informational_responses() {
         // Example from Section 5.2 of RFC 9292 - Response including Informational Responses
         const RESPONSE_EXAMPLE: &[u8] = &[
             0x03, 0x40, 0x66, 0x07, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x0a, 0x22, 0x73,
@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_rfc9292_response_example_known_length_with_trailer() {
+    fn decode_rfc9292_response_example_known_length_with_trailer() {
         // Example from Section 5.2 of RFC 9292 - Known-Length Encoding of Response
         const RESPONSE_EXAMPLE: &[u8] = &[
             0x01, 0x40, 0xc8, 0x00, 0x1d, 0x54, 0x68, 0x69, 0x73, 0x20, 0x63, 0x6f, 0x6e, 0x74,

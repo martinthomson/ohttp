@@ -80,8 +80,7 @@ impl<T> HttpMessage<T> {
                     .unwrap_or_default();
                 let path = uri
                     .path_and_query()
-                    .map(|p| p.as_str().as_bytes().to_vec())
-                    .unwrap_or_else(|| b"/".to_vec());
+                    .map_or_else(|| b"/".to_vec(), |p| p.as_str().as_bytes().to_vec());
 
                 Ok(ControlData::Request {
                     method,
@@ -110,9 +109,9 @@ impl<T> HttpMessage<T> {
 /// This type provides functionality to encode `http::Request`/`http::Response`
 /// structures into BHTTP format through asynchronous streaming.
 ///
-/// The encoder works with any type that implements [http_body::Body], allowing
+/// The encoder works with any type that implements [`http_body::Body`], allowing
 /// for efficient streaming encoding of HTTP data without needing to load the entire
-/// message into memory. This struct implements the [futures_core::stream::Stream]
+/// message into memory. This struct implements the [`futures_core::stream::Stream`]
 /// trait, producing chunks of BHTTP-encoded binary data. It supports streaming
 /// bodies and trailers.
 ///
@@ -184,8 +183,8 @@ where
     /// 2. Then, it streams the body data in chunks
     /// 3. Finally, it handles trailers if present
     ///
-    /// For those who needs a [futures::prelude::AsyncRead] or
-    /// [futures::stream::IntoAsyncRead], see
+    /// For those who needs a [`futures::prelude::AsyncRead`] or
+    /// [`futures::stream::IntoAsyncRead`], see
     /// [`into_async_read`](futures::stream::TryStreamExt::into_async_read).
     ///
     /// # Arguments
@@ -303,7 +302,7 @@ mod tests {
     use http_body_util::StreamBody;
 
     #[test]
-    fn test_request_to_bhttp_conversion() {
+    fn request_to_bhttp_conversion() {
         let request = Request::builder()
             .method("GET")
             .uri("https://example.com/path")
@@ -330,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_bhttp_conversion() {
+    fn response_to_bhttp_conversion() {
         let response = Response::builder()
             .status(200)
             .header("Content-Type", "text/plain")
@@ -356,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trailers_conversion() {
+    fn trailers_conversion() {
         // Create a body with trailers
         let data_frame = Frame::data(Bytes::from("test body"));
 
@@ -392,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_rfc9292_request_example_indeterminate_length() {
+    fn encode_rfc9292_request_example_indeterminate_length() {
         // Modifyed example from Section 5.1 of RFC 9292 - Indeterminate-Length Binary Encoding of Request
         const REQUEST_EXAMPLE: &[u8] = &[
             0x02, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x09, 0x68, 0x65,
@@ -441,17 +440,9 @@ mod tests {
         // the expected data, ignoring any trailing zeros in the expected data
 
         // Find where the actual data ends (ignoring trailing zeros)
-        let expected_end = expected
-            .iter()
-            .rposition(|&x| x != 0)
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let expected_end = expected.iter().rposition(|&x| x != 0).map_or(0, |i| i + 1);
 
-        let generated_end = generated
-            .iter()
-            .rposition(|&x| x != 0)
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let generated_end = generated.iter().rposition(|&x| x != 0).map_or(0, |i| i + 1);
 
         // Check that the first part matches exactly
         assert_eq!(
