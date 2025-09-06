@@ -17,7 +17,7 @@ use crate::{
     entropy,
     err::Res,
     export_secret, make_aead, random, Aead, Error, HpkeConfig, HpkeR, HpkeS, KeyConfig, KeyId,
-    Mode, PublicKey, SymKey, REQUEST_HEADER_LEN,
+    Mode, PublicKey, SymKey, MAX_ENTROPY_LEN, REQUEST_HEADER_LEN,
 };
 
 /// The info string for a chunked request.
@@ -241,7 +241,7 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: Default::default(),
                 read: 0,
             },
         })
@@ -265,7 +265,7 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: Default::default(),
                 read: 0,
             },
         })
@@ -809,7 +809,7 @@ enum ClientResponseState {
     Header {
         enc: Vec<u8>,
         secret: SymKey,
-        nonce: [u8; 16],
+        nonce: [u8; MAX_ENTROPY_LEN],
         read: usize,
     },
     Body {

@@ -62,6 +62,7 @@ const INFO_REQUEST: &[u8] = b"message/bhttp request";
 const LABEL_RESPONSE: &[u8] = b"message/bhttp response";
 const INFO_KEY: &[u8] = b"key";
 const INFO_NONCE: &[u8] = b"nonce";
+const MAX_ENTROPY_LEN: usize = 32;
 
 /// The type of a key identifier.
 pub type KeyId = u8;
