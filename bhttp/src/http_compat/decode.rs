@@ -245,7 +245,9 @@ impl TryFrom<crate::Header> for request::Parts {
             let mut uri_builder = Uri::builder();
 
             if let Some(scheme) = control_data.scheme() {
-                uri_builder = uri_builder.scheme(scheme);
+                if !scheme.is_empty() {
+                    uri_builder = uri_builder.scheme(scheme);
+                }
             }
 
             // Handle authority field
@@ -258,16 +260,20 @@ impl TryFrom<crate::Header> for request::Parts {
                     // this is permitted in bhttp and report an InvalidUri(InvalidFormat) error. To
                     // reconcile this difference, we will attempt to retrieve the authority from the
                     // request headers.
-                    if control_data.scheme().is_some() {
-                        if let Some(host_value) = headers.get("host") {
-                            uri_builder = uri_builder.authority(host_value.to_str()?);
+                    if let Some(scheme) = control_data.scheme() {
+                        if !scheme.is_empty() {
+                            if let Some(host_value) = headers.get("host") {
+                                uri_builder = uri_builder.authority(host_value.to_str()?);
+                            }
                         }
                     }
                 }
             }
 
             if let Some(path) = control_data.path() {
-                uri_builder = uri_builder.path_and_query(std::str::from_utf8(path)?);
+                if !path.is_empty() {
+                    uri_builder = uri_builder.path_and_query(std::str::from_utf8(path)?);
+                }
             }
 
             uri_builder.build()?
