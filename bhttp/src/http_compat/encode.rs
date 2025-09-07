@@ -73,14 +73,18 @@ impl<T> HttpMessage<T> {
                 let method = req.method().as_str().as_bytes().to_vec();
                 let uri = req.uri();
 
-                let scheme = uri.scheme_str().unwrap_or("https").as_bytes().to_vec();
+                let scheme = uri
+                    .scheme_str()
+                    .map(|scheme| scheme.as_bytes().to_vec())
+                    .unwrap_or_default();
                 let authority = uri
                     .authority()
                     .map(|a| a.as_str().as_bytes().to_vec())
                     .unwrap_or_default();
                 let path = uri
                     .path_and_query()
-                    .map_or_else(|| b"/".to_vec(), |p| p.as_str().as_bytes().to_vec());
+                    .map(|p| p.as_str().as_bytes().to_vec())
+                    .unwrap_or_default();
 
                 Ok(ControlData::Request {
                     method,
