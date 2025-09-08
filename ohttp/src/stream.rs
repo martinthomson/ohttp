@@ -271,10 +271,15 @@ enum ChunkReader {
         len: [u8; 8],
         offset: usize,
     },
-    Data {
+    EncryptedData {
         buf: Vec<u8>,
         offset: usize,
         length: usize,
+    },
+    CleartextData {
+        buf: Vec<u8>,
+        offset: usize,
+        last: bool,
     },
     Done,
 }
@@ -290,7 +295,7 @@ impl ChunkReader {
     fn data(length: usize) -> Self {
         // Avoid use `with_capacity` here.  Only allocate when necessary.
         // We might be able to into the buffer we're given instead, to save an allocation.
-        Self::Data {
+        Self::EncryptedData {
             buf: Vec::new(),
             // Note that because we're allocating the full chunk,
             // we need to track what has been used.
@@ -393,7 +398,7 @@ impl ChunkReader {
         aead: &mut C,
         output: &mut [u8],
     ) -> Option<Poll<IoResult<usize>>> {
-        let Self::Data {
+        let Self::EncryptedData {
             buf,
             offset,
             length,
@@ -430,6 +435,35 @@ impl ChunkReader {
         }
     }
 
+    /// Provide any decrypted cleartext that we were unable to deliver
+    /// on previous calls to `read()`.
+    fn deliver_cleartext(&mut self, output: &mut [u8]) -> Option<usize> {
+        let Self::CleartextData { buf, offset, last } = self else {
+            return None;
+        };
+
+        if *offset + output.len() < buf.len() {
+            // `output` is too small for the chunk, fill it and update the offset.
+            output.copy_from_slice(&buf[*offset..*offset + output.len()]);
+            *offset += output.len();
+            Some(output.len())
+        } else {
+            // Deliver what we have remaining.
+            //
+            // Note that this could, by using a different return status,
+            // allow `read()` function to continue reading.
+            // However, that complicates the code more than is really worth it.
+            let len = buf.len() - *offset;
+            output[..len].copy_from_slice(&buf[*offset..]);
+            if *last {
+                *self = Self::Done;
+            } else {
+                *self = Self::length();
+            }
+            Some(len)
+        }
+    }
+
     fn read<S: AsyncRead, C: Decrypt>(
         &mut self,
         mut src: Pin<&mut S>,
@@ -437,6 +471,10 @@ impl ChunkReader {
         cipher: &mut C,
         output: &mut [u8],
     ) -> Poll<IoResult<usize>> {
+        if let Some(delivered) = self.deliver_cleartext(output) {
+            return Poll::Ready(Ok(delivered));
+        }
+
         while !matches!(self, Self::Done) {
             if let Some(res) = self.read_length(src.as_mut(), cx, cipher) {
                 return res;
@@ -447,7 +485,7 @@ impl ChunkReader {
                 return res;
             }
 
-            let Self::Data {
+            let Self::EncryptedData {
                 buf,
                 offset,
                 length,
@@ -487,18 +525,31 @@ impl ChunkReader {
 
             let aad = if last { FINAL_CHUNK_AAD } else { CHUNK_AAD };
             let pt = cipher.open(aad, buf).map_err(IoError::other)?;
-            output[..pt.len()].copy_from_slice(&pt);
 
-            if last {
-                *self = Self::Done;
+            let delivered = if pt.len() > output.len() {
+                output.copy_from_slice(&pt[..output.len()]);
+                // Buffer any undelivered cleartext data.
+                *self = Self::CleartextData {
+                    buf: pt[output.len()..].to_vec(),
+                    offset: 0,
+                    last,
+                };
+                output.len()
             } else {
-                *self = Self::length();
-                if pt.is_empty() {
-                    continue; // Read the next chunk
+                output[..pt.len()].copy_from_slice(&pt);
+                if last {
+                    *self = Self::Done;
+                } else {
+                    *self = Self::length();
+                    if pt.is_empty() {
+                        // We can't return zero length, as that means "end of stream".
+                        // So read the next chunk if this one was empty.
+                        continue;
+                    }
                 }
-            }
-
-            return Poll::Ready(Ok(pt.len()));
+                pt.len()
+            };
+            return Poll::Ready(Ok(delivered));
         }
 
         Poll::Ready(Ok(0))
@@ -1027,5 +1078,32 @@ mod test {
         let (response_data, _) = read_wrapped(client_response, Stutter::new);
         assert_eq!(response_data, RESPONSE);
         trace!("Response: {}", hex::encode(response_data));
+    }
+
+    /// Check that a longer request can be read properly.
+    /// This checks that any cleartext that doesn't fit in the output buffer
+    /// is correctly buffered.
+    #[test]
+    fn long_request() {
+        /// A longer request.
+        const LONG_REQUEST: &[u8] = &[0u8; 1024];
+        init();
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("Config: {}", hex::encode(&encoded_config)); // The client sends a request.
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let mut client_request = client.encapsulate_stream(request_write).unwrap();
+        client_request
+            .write_all(LONG_REQUEST)
+            .sync_resolve()
+            .unwrap();
+        client_request.close().sync_resolve().unwrap();
+        trace!("Request: {}", hex::encode(LONG_REQUEST));
+        let enc_request = request_read.sync_read_to_end();
+        trace!("Encapsulated Request: {}", hex::encode(&enc_request)); // The server receives a request.
+        let mut server_request = server.decapsulate_stream(&enc_request[..]);
+        assert_eq!(server_request.sync_read_to_end(), LONG_REQUEST);
     }
 }
