@@ -116,7 +116,7 @@ pub struct HpkeS {
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
     #[allow(clippy::similar_names)]
-    pub fn new(config: Config, pk_r: &mut PublicKey, info: &[u8]) -> Res<Self> {
+    pub fn new(config: Config, pk_r: &PublicKey, info: &[u8]) -> Res<Self> {
         let (sk_e, pk_e) = generate_key_pair(config.kem)?;
         let context = HpkeContext::new(config)?;
         secstatus_to_res(unsafe {

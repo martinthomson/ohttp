@@ -172,7 +172,7 @@ pub struct HpkeS {
 
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
-    pub fn new(config: Config, pk_r: &mut PublicKey, info: &[u8]) -> Res<Self> {
+    pub fn new(config: Config, pk_r: &PublicKey, info: &[u8]) -> Res<Self> {
         let mut csprng = rng();
 
         macro_rules! dispatch_hpkes_new {
@@ -498,8 +498,8 @@ mod test {
     fn make() {
         init();
         let cfg = Config::default();
-        let (sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
-        let hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
+        let (sk_r, pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let hpke_s = HpkeS::new(cfg, &pk_r, INFO).unwrap();
         let _hpke_r = HpkeR::new(cfg, &pk_r, &sk_r, &hpke_s.enc().unwrap(), INFO).unwrap();
     }
 
@@ -513,10 +513,10 @@ mod test {
             ..Config::default()
         };
         assert!(cfg.supported());
-        let (sk_r, mut pk_r) = generate_key_pair(cfg.kem()).unwrap();
+        let (sk_r, pk_r) = generate_key_pair(cfg.kem()).unwrap();
 
         // Send
-        let mut hpke_s = HpkeS::new(cfg, &mut pk_r, INFO).unwrap();
+        let mut hpke_s = HpkeS::new(cfg, &pk_r, INFO).unwrap();
         let enc = hpke_s.enc().unwrap();
         let ct = hpke_s.seal(AAD, PT).unwrap();
 
