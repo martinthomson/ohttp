@@ -10,6 +10,7 @@ use futures::{io::AsyncRead, FutureExt};
 use super::int::{read_varint, ReadVarint};
 use crate::{Error, Res};
 
+/// A reader for a varint-length-prefixed buffer.
 #[pin_project::pin_project(project = ReadVecProj)]
 #[allow(clippy::module_name_repetitions)]
 pub enum ReadVec<S> {
@@ -26,8 +27,6 @@ pub enum ReadVec<S> {
 }
 
 impl<S> ReadVec<S> {
-    #![allow(dead_code)] // TODO these really need to be used.
-
     /// # Panics
     /// If `limit` is more than `usize::MAX` or
     /// if this is called after the length is read.

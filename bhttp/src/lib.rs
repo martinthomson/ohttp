@@ -29,6 +29,7 @@ const COOKIE: &[u8] = b"cookie";
 const TRANSFER_ENCODING: &[u8] = b"transfer-encoding";
 const CHUNKED: &[u8] = b"chunked";
 
+/// An HTTP status code.
 #[derive(Clone, Copy, Debug)]
 pub struct StatusCode(u16);
 
@@ -96,6 +97,7 @@ pub trait ReadSeek: io::BufRead + io::Seek {}
 impl<T> ReadSeek for io::Cursor<T> where T: AsRef<[u8]> {}
 impl<T> ReadSeek for io::BufReader<T> where T: io::Read + io::Seek {}
 
+/// The encoding mode of a binary HTTP message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     KnownLength,
@@ -113,6 +115,7 @@ impl TryFrom<u64> for Mode {
     }
 }
 
+/// A single HTTP field.
 pub struct Field {
     name: Vec<u8>,
     value: Vec<u8>,
@@ -168,8 +171,10 @@ impl std::fmt::Debug for Field {
     }
 }
 
+/// A field section (headers or trailers).
 #[derive(Default)]
 pub struct FieldSection(Vec<Field>);
+
 impl FieldSection {
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -396,6 +401,7 @@ impl std::fmt::Debug for FieldSection {
     }
 }
 
+/// Control data for an HTTP message, either request or response.
 pub enum ControlData {
     Request {
         method: Vec<u8>,
@@ -663,6 +669,7 @@ impl std::fmt::Debug for ControlData {
     }
 }
 
+/// An informational status code and the associated header fields.
 pub struct InformationalResponse {
     status: StatusCode,
     fields: FieldSection,
@@ -705,6 +712,7 @@ impl DerefMut for InformationalResponse {
     }
 }
 
+/// A header block, including control data and headers.
 pub struct Header {
     control: ControlData,
     fields: FieldSection,
@@ -753,6 +761,8 @@ impl std::fmt::Debug for Header {
     }
 }
 
+/// An HTTP message, either request or response,
+/// including any optional informational responses on a response.
 pub struct Message {
     informational: Vec<InformationalResponse>,
     header: Header,
@@ -761,6 +771,7 @@ pub struct Message {
 }
 
 impl Message {
+    /// Construct a minimal request message.
     #[must_use]
     pub fn request(method: Vec<u8>, scheme: Vec<u8>, authority: Vec<u8>, path: Vec<u8>) -> Self {
         Self {
@@ -776,6 +787,7 @@ impl Message {
         }
     }
 
+    /// Construct a minimal response message.
     #[must_use]
     pub fn response(status: StatusCode) -> Self {
         Self {
@@ -786,38 +798,46 @@ impl Message {
         }
     }
 
+    /// Set a header field value.
     pub fn put_header(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
         self.header.put(name, value);
     }
 
+    /// Set a trailer field value.
     pub fn put_trailer(&mut self, name: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
         self.trailer.put(name, value);
     }
 
+    /// Extend the content of the message with the given bytes.
     pub fn write_content(&mut self, d: impl AsRef<[u8]>) {
         self.content.extend_from_slice(d.as_ref());
     }
 
+    /// Access informational status responses.
     #[must_use]
     pub fn informational(&self) -> &[InformationalResponse] {
         &self.informational
     }
 
+    /// Access control data.
     #[must_use]
     pub fn control(&self) -> &ControlData {
         self.header.control()
     }
 
+    /// Get the header.
     #[must_use]
     pub fn header(&self) -> &Header {
         &self.header
     }
 
+    /// Get the content of the message.
     #[must_use]
     pub fn content(&self) -> &[u8] {
         &self.content
     }
 
+    /// Get the trailer fields.
     #[must_use]
     pub fn trailer(&self) -> &FieldSection {
         &self.trailer
@@ -847,6 +867,7 @@ impl Message {
         }
     }
 
+    /// Read an HTTP/1.1 message.
     #[cfg(feature = "http")]
     #[allow(clippy::read_zero_byte_vec)] // https://github.com/rust-lang/rust-clippy/issues/9274
     pub fn read_http<T, R>(r: &mut T) -> Res<Self>
@@ -901,6 +922,7 @@ impl Message {
         })
     }
 
+    /// Write out an HTTP/1.1 message.
     #[cfg(feature = "http")]
     pub fn write_http(&self, w: &mut impl io::Write) -> Res<()> {
         for info in &self.informational {
@@ -969,6 +991,7 @@ impl Message {
         })
     }
 
+    /// Write a BHTTP message.
     pub fn write_bhttp(&self, mode: Mode, w: &mut impl io::Write) -> Res<()> {
         write_varint(self.header.control.code(mode), w)?;
         for info in &self.informational {

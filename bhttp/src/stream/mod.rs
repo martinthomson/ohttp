@@ -392,6 +392,7 @@ impl<S: AsyncRead + Unpin> AsyncMessage<S> {
     }
 }
 
+/// Asynchronous reading for a [`Message`].
 pub trait AsyncReadMessage: Sized {
     fn async_read<S: AsyncRead + Unpin>(src: S) -> AsyncMessage<S>;
 }
@@ -445,9 +446,9 @@ mod test {
         const INFO: &[u8] = &[1, 64, 100, 0, 64, 200, 0];
         let mut buf_alias = INFO;
         let mut msg = Message::async_read(&mut buf_alias);
-        let info = msg.informational().sync_collect().unwrap();
+        let info = msg.informational().sync_collect::<Vec<_>>().unwrap();
         assert_eq!(info.len(), 1);
-        let err = msg.informational().sync_collect();
+        let err = msg.informational().sync_collect::<Vec<_>>();
         assert!(matches!(err, Err(Error::InvalidState)));
         let hdr = pin!(msg.header()).sync_resolve().unwrap();
         assert_eq!(hdr.control().status().unwrap().code(), 200);
@@ -458,7 +459,7 @@ mod test {
     fn sample_requests() {
         fn validate_sample_request(mut buf: &[u8]) {
             let mut msg = Message::async_read(&mut buf);
-            let info = msg.informational().sync_collect().unwrap();
+            let info = msg.informational().sync_collect::<Vec<_>>().unwrap();
             assert!(info.is_empty());
 
             let hdr = pin!(msg.header()).sync_resolve().unwrap();

@@ -75,6 +75,7 @@ impl<F: Future + Unpin> SyncResolve for F {
     }
 }
 
+/// A synchronous collect method for [`TryStream`].
 pub trait SyncTryCollect {
     type Item;
     type Error;
@@ -82,18 +83,19 @@ pub trait SyncTryCollect {
     /// Synchronously gather all items from a stream.
     /// # Errors
     /// When the underlying source produces an error.
-    fn sync_collect(self) -> Result<Vec<Self::Item>, Self::Error>;
+    fn sync_collect<C: Default + Extend<Self::Item>>(self) -> Result<C, Self::Error>;
 }
 
 impl<S: TryStream> SyncTryCollect for S {
     type Item = S::Ok;
     type Error = S::Error;
 
-    fn sync_collect(self) -> Result<Vec<Self::Item>, Self::Error> {
-        pin!(self.try_collect::<Vec<_>>()).sync_resolve()
+    fn sync_collect<C: Default + Extend<Self::Item>>(self) -> Result<C, Self::Error> {
+        pin!(self.try_collect::<C>()).sync_resolve()
     }
 }
 
+/// Synchronous reading for [`AsyncRead`], using [`SyncResolve`].
 pub trait SyncRead {
     fn sync_read_exact(&mut self, amount: usize) -> Vec<u8>;
     fn sync_read_to_end(&mut self) -> Vec<u8>;
@@ -120,6 +122,7 @@ pub trait Unadapt {
     fn unadapt(self) -> Self::S;
 }
 
+/// An adapter for [`AsyncRead`] and [`AsyncWrite`] that reads or writes a single byte at a time.
 #[pin_project(project = DribbleProjection)]
 pub struct Dribble<S> {
     #[pin]
@@ -171,6 +174,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Dribble<S> {
     }
 }
 
+/// An adapter for [`AsyncRead`] and [`AsyncWrite`] that blocks at a chosen offset.
 #[pin_project(project = SplitAtProjection)]
 pub struct SplitAt<S> {
     #[pin]
@@ -258,6 +262,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for SplitAt<S> {
     }
 }
 
+/// An adapter for [`AsyncRead`] and [`AsyncWrite`] that blocks after every single byte read or written.
 #[pin_project(project = StutterProjection)]
 pub struct Stutter<S> {
     stall: bool,
@@ -319,7 +324,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Stutter<S> {
     }
 }
 
-/// A Cursor implementation that has separate read and write cursors.
+/// A paired [`AsyncRead`]/[`AsyncWrite`] implementation pair with separate read and write cursors.
 ///
 /// This allows tests to create paired read and write objects,
 /// where writes to one can be read by the other.

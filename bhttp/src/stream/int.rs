@@ -8,6 +8,7 @@ use futures::io::AsyncRead;
 
 use crate::{Error, Res};
 
+/// A reader for a network-byte-order integer of predetermined size.
 #[pin_project::pin_project]
 pub struct ReadUint<S, const N: usize> {
     ///  The source of data.
@@ -57,6 +58,7 @@ fn read_uint<S, const N: usize>(src: S) -> ReadUint<S, N> {
     }
 }
 
+/// A reader for a [QUIC variable-length integer](https://datatracker.ietf.org/doc/html/rfc9000#section-16).
 #[pin_project::pin_project(project = ReadVarintProj)]
 pub enum ReadVarint<S> {
     // Invariant: this Option always contains Some.
@@ -129,6 +131,7 @@ impl<S: AsyncRead + Unpin> Future for ReadVarint<S> {
     }
 }
 
+/// Read a [QUIC variable-length integer](https://datatracker.ietf.org/doc/html/rfc9000#section-16).
 pub fn read_varint<S>(src: S) -> ReadVarint<S> {
     ReadVarint::First(Some(src))
 }
