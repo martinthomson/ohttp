@@ -1,3 +1,7 @@
+use std::{convert::TryFrom, os::raw::c_int, ptr::null_mut};
+
+use log::trace;
+
 use super::{
     super::hpke::{Aead, Kdf},
     p11::{
@@ -10,8 +14,6 @@ use super::{
     },
 };
 use crate::err::Res;
-use log::trace;
-use std::{convert::TryFrom, os::raw::c_int, ptr::null_mut};
 
 #[derive(Clone, Copy)]
 pub enum KeyMechanism {
