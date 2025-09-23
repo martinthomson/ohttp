@@ -91,7 +91,7 @@ impl Aead {
         let slot = super::p11::Slot::internal()?;
         let ptr = unsafe {
             sys::PK11_ImportSymKey(
-                *slot,
+                slot.ptr(),
                 Self::mech(algorithm),
                 sys::PK11Origin::PK11_OriginUnwrap,
                 sys::CK_ATTRIBUTE_TYPE::from(sys::CKA_ENCRYPT | sys::CKA_DECRYPT),
@@ -118,7 +118,7 @@ impl Aead {
             PK11_CreateContextBySymKey(
                 Self::mech(algorithm),
                 mode.p11mode(),
-                **key,
+                key.ptr(),
                 &Item::wrap(&nonce_base[..]),
             )
         };
@@ -137,7 +137,7 @@ impl Aead {
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
         secstatus_to_res(unsafe {
             PK11_AEADOp(
-                **ctx,
+                ctx.ptr(),
                 CK_GENERATOR_FUNCTION::from(mech),
                 c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
                 nonce.as_mut_ptr(),
@@ -198,7 +198,7 @@ impl Encrypt for Aead {
         let mut tag = vec![0; TAG_LEN];
         secstatus_to_res(unsafe {
             PK11_AEADOp(
-                *self.ctx,
+                self.ctx.ptr(),
                 CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
                 c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
                 nonce.as_mut_ptr(),

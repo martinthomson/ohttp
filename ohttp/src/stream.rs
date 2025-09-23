@@ -202,9 +202,9 @@ pub struct ClientRequest<D> {
 
 impl<D> ClientRequest<D> {
     /// Start the processing of a stream.
-    pub fn start(dst: D, config: HpkeConfig, key_id: KeyId, mut pk: PublicKey) -> Res<Self> {
+    pub fn start(dst: D, config: HpkeConfig, key_id: KeyId, pk: &PublicKey) -> Res<Self> {
         let info = build_info(INFO_REQUEST, key_id, config)?;
-        let hpke = HpkeS::new(config, &mut pk, &info)?;
+        let hpke = HpkeS::new(config, pk, &info)?;
 
         let mut header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
         debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
