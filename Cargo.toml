@@ -7,4 +7,18 @@ members = [
   "ohttp-client",
   "ohttp-client-cli",
   "ohttp-server",
+  "sync-async",
 ]
+
+[workspace.package]
+homepage = "https://github.com/martinthomson/ohttp"
+repository = "https://github.com/martinthomson/ohttp"
+authors = ["Martin Thomson <mt@lowentropy.net>"]
+description = "Oblivious HTTP"
+keywords = ["ohttp", "http", "bhttp", "ietf"]
+categories = ["network-programming", "web-programming", "security"]
+readme = "README.md"
+version = "0.7.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.82.0"

@@ -1,8 +1,9 @@
 #![deny(warnings, clippy::pedantic)]
 
+use std::io::{self, BufRead, Write};
+
 use bhttp::{Message, Mode};
 use ohttp::{init, ClientRequest};
-use std::io::{self, BufRead, Write};
 
 fn main() {
     init();

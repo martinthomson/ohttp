@@ -1,8 +1,16 @@
 [package]
 name = "ohttp-client-cli"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
+description = "Test client CLI for Oblivious HTTP"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [features]
 default = ["rust-hpke"]
@@ -10,12 +18,12 @@ nss = ["ohttp/nss"]
 rust-hpke = ["ohttp/rust-hpke"]
 
 [dependencies]
-env_logger = {version = "0.10", default-features = false}
+env_logger = {version = "0.11", default-features = false}
 hex = "0.4"
 
 [dependencies.bhttp]
 path= "../bhttp"
-features = ["bhttp", "http"]
+features = ["http"]
 
 [dependencies.ohttp]
 path= "../ohttp"

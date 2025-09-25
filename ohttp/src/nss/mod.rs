@@ -1,8 +1,4 @@
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+#![allow(clippy::incompatible_msrv)] // This feature needs 1.70
 
 mod err;
 #[macro_use]
@@ -11,11 +7,12 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
-pub use self::p11::{random, PrivateKey, PublicKey};
+use std::{ptr::null, sync::OnceLock};
+
 use err::secstatus_to_res;
 pub use err::Error;
-use lazy_static::lazy_static;
-use std::ptr::null;
+
+pub use self::p11::{random, PrivateKey, PublicKey, SymKey};
 
 #[allow(clippy::pedantic, non_upper_case_globals, clippy::upper_case_acronyms)]
 mod nss_init {
@@ -45,17 +42,7 @@ impl Drop for NssLoaded {
     }
 }
 
-lazy_static! {
-    static ref INITIALIZED: NssLoaded = {
-        if already_initialized() {
-            return NssLoaded::External;
-        }
-
-        secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-
-        NssLoaded::NoDb
-    };
-}
+static INITIALIZED: OnceLock<NssLoaded> = OnceLock::new();
 
 fn already_initialized() -> bool {
     unsafe { nss_init::NSS_IsInitialized() != 0 }
@@ -63,5 +50,13 @@ fn already_initialized() -> bool {
 
 /// Initialize NSS.  This only executes the initialization routines once.
 pub fn init() {
-    lazy_static::initialize(&INITIALIZED);
+    INITIALIZED.get_or_init(|| {
+        if already_initialized() {
+            NssLoaded::External
+        } else {
+            secstatus_to_res(unsafe { nss_init::NSS_NoDB_Init(null()) })
+                .expect("NSS_NoDB_Init failed");
+            NssLoaded::NoDb
+        }
+    });
 }

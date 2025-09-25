@@ -1,25 +1,30 @@
 [package]
 name = "bhttp"
-version = "0.5.4"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
-edition = "2021"
-rust-version = "1.63.0"
-license = "MIT OR Apache-2.0"
 description = "Binary HTTP messages (RFC 9292)"
-repository = "https://github.com/martinthomson/ohttp"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [features]
-default = ["bhttp"]
-bhttp = ["read-bhttp", "write-bhttp"]
-http = ["read-http", "write-http"]
-read-bhttp = []
-write-bhttp = []
-read-http = ["url"]
-write-http = []
+default = []
+http = ["dep:url"]
+stream = ["dep:futures", "dep:pin-project"]
 
 [dependencies]
+futures = {version = "0.3", optional = true}
+pin-project = {version = "1.1", optional = true}
 thiserror = "2"
 url = {version = "2", optional = true}
 
 [dev-dependencies]
 hex = "0.4"
+
+[dev-dependencies.sync-async]
+path= "../sync-async"
