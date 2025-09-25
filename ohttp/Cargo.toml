@@ -38,7 +38,7 @@ pin-project = {version = "1.1", optional = true}
 rand = {version = "0.9", optional = true}
 regex = {version = "~1.11", optional = true}
 sha2 = {version = "0.10", optional = true}
-thiserror = "1"
+thiserror = "2"
 
 [build-dependencies]
 mozbuild = {version = "0.1", optional = true}
