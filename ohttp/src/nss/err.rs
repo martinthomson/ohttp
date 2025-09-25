@@ -63,12 +63,12 @@ impl std::fmt::Display for Error {
     }
 }
 
-use std::ffi::CStr;
-
 fn wrap_str_fn<F>(f: F, dflt: &str) -> String
 where
     F: FnOnce() -> *const c_char,
 {
+    use std::ffi::CStr;
+
     unsafe {
         let p = f();
         if p.is_null() {

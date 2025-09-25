@@ -127,10 +127,10 @@ impl ClientRequest {
 
     /// Encapsulate a request.  This consumes this object.
     /// This produces a response handler and the bytes of an encapsulated request.
-    pub fn encapsulate(mut self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
+    pub fn encapsulate(self, request: &[u8]) -> Res<(Vec<u8>, ClientResponse)> {
         // Build the info, which contains the message header.
         let info = build_info(INFO_REQUEST, self.key_id, self.config)?;
-        let mut hpke = HpkeS::new(self.config, &mut self.pk, &info)?;
+        let mut hpke = HpkeS::new(self.config, &self.pk, &info)?;
 
         let header = Vec::from(&info[INFO_REQUEST.len() + 1..]);
         debug_assert_eq!(header.len(), REQUEST_HEADER_LEN);
@@ -153,7 +153,7 @@ impl ClientRequest {
 
     #[cfg(feature = "stream")]
     pub fn encapsulate_stream<S>(self, dst: S) -> Res<StreamClient<S>> {
-        StreamClient::start(dst, self.config, self.key_id, self.pk)
+        StreamClient::start(dst, self.config, self.key_id, &self.pk)
     }
 }
 
