@@ -16,15 +16,24 @@ readme.workspace = true
 default = []
 http = ["dep:url"]
 stream = ["dep:futures", "dep:pin-project"]
+http-compat = ["http", "stream", "dep:http", "dep:futures", "dep:http-body", "dep:futures-core", "dep:bytes", "dep:tokio-util", "tokio-util/compat", "tokio-util/io", "dep:tokio", "dep:async-stream"]
 
 [dependencies]
 futures = {version = "0.3", optional = true}
 pin-project = {version = "1.1", optional = true}
 thiserror = "2"
 url = {version = "2", optional = true}
+bytes = { version = "1.0", optional = true }
+futures-core = { version = "0.3.24", optional = true }
+http = { version = "1.0", optional = true }
+http-body = { version = "1.0", optional = true }
+tokio-util = { version = "0.7.16", optional = true }
+tokio = { version = "1.47.1", optional = true, default-features = false }
+async-stream = { version = "0.3.6", optional = true }
 
 [dev-dependencies]
 hex = "0.4"
+http-body-util = "0.1"
 
 [dev-dependencies.sync-async]
 path= "../sync-async"
