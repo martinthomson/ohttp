@@ -219,14 +219,14 @@ mod nss {
         }
 
         // Dynamic libs that aren't transitively included by NSS libs.
-        match target_os {
-          // Windows doesn't need these
-          "windows" => {}
-          // Android has pthread built into libc (bionic), don't link it separately
-          // pthread is not available as a separate library on Android
-          "android" => dynamic_libs.extend_from_slice(&["dl", "c", "z"]),
-          // Other Unix-like systems (Linux, macOS, etc.)
-          _ => dynamic_libs.extend_from_slice(&["pthread", "dl", "c", "z"]),
+        match target_os.as_str() {
+            // Windows doesn't need these
+            "windows" => {}
+            // Android has pthread built into libc (bionic), don't link it separately
+            // pthread is not available as a separate library on Android
+            "android" => dynamic_libs.extend_from_slice(&["dl", "c", "z"]),
+            // Other Unix-like systems (Linux, macOS, etc.)
+            _ => dynamic_libs.extend_from_slice(&["pthread", "dl", "c", "z"]),
         }
 
         if cfg!(not(feature = "external-sqlite")) && target_os == "macos" {
