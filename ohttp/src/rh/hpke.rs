@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use ::hpke as rust_hpke;
+use ::inout::InOutBuf;
 use ::rand::rng;
 use log::trace;
 use rust_hpke::{
@@ -126,17 +127,18 @@ enum SenderContext {
 
 impl SenderContext {
     fn seal(&mut self, plaintext: &mut [u8], aad: &[u8]) -> Res<Vec<u8>> {
+        let buf = InOutBuf::from(plaintext);
         Ok(match self {
             Self::X25519HkdfSha256(SenderContextX25519HkdfSha256::HkdfSha256(
                 SenderContextX25519HkdfSha256HkdfSha256::AesGcm128(context),
             )) => {
-                let tag = context.seal_in_place_detached(plaintext, aad)?;
+                let tag = context.seal_inout_detached(buf, aad)?;
                 Vec::from(tag.to_bytes().as_slice())
             }
             Self::X25519HkdfSha256(SenderContextX25519HkdfSha256::HkdfSha256(
                 SenderContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305(context),
             )) => {
-                let tag = context.seal_in_place_detached(plaintext, aad)?;
+                let tag = context.seal_inout_detached(buf, aad)?;
                 Vec::from(tag.to_bytes().as_slice())
             }
         })
@@ -303,9 +305,10 @@ impl ReceiverContext {
                 }
                 let (ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<AesGcm128>::size());
+                let mut ct = InOutBuf::from(ct);
                 let tag = AeadTag::<AesGcm128>::from_bytes(tag_slice)?;
-                context.open_in_place_detached(ct, aad, &tag)?;
-                ct
+                context.open_inout_detached(ct.reborrow(), aad, &tag)?;
+                ct.into_out()
             }
             Self::X25519HkdfSha256(ReceiverContextX25519HkdfSha256::HkdfSha256(
                 ReceiverContextX25519HkdfSha256HkdfSha256::ChaCha20Poly1305(context),
@@ -315,9 +318,10 @@ impl ReceiverContext {
                 }
                 let (ct, tag_slice) =
                     ciphertext.split_at_mut(ciphertext.len() - AeadTag::<ChaCha20Poly1305>::size());
+                let mut ct = InOutBuf::from(ct);
                 let tag = AeadTag::<ChaCha20Poly1305>::from_bytes(tag_slice)?;
-                context.open_in_place_detached(ct, aad, &tag)?;
-                ct
+                context.open_inout_detached(ct.reborrow(), aad, &tag)?;
+                ct.into_out()
             }
         })
     }
