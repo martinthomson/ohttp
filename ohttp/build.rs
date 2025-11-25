@@ -270,16 +270,13 @@ mod nss {
         builder = builder.clang_arg("-v");
 
         builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-        if env::consts::OS == "windows" {
-            builder = builder.clang_arg("-DWIN");
-        } else if env::consts::OS == "macos" {
-            builder = builder.clang_arg("-DDARWIN");
-        } else if env::consts::OS == "linux" {
-            builder = builder.clang_arg("-DLINUX");
-        } else if env::consts::OS == "android" {
-            builder = builder.clang_arg("-DLINUX");
-            builder = builder.clang_arg("-DANDROID");
-        }
+        builder = match env::consts::OS {
+            "windows" => builder.clang_arg("-DWIN"),
+            "macos" => builder.clang_arg("-DDARWIN"),
+            "linux" => builder.clang_arg("-DLINUX"),
+            "android" => builder.clang_arg("-DLINUX").clang_arg("-DANDROID"),
+            _ => builder,
+        };
         if bindings.cplusplus {
             builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
         }
