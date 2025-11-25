@@ -165,15 +165,15 @@ mod nss {
         // NSS optionally builds platform-specific acceleration libraries as
         // separate static libraries.
         let accel_libs = &[
-            "gcm-aes-x86_c_lib",
-            "sha-x86_c_lib",
-            "hw-acc-crypto-avx",
-            "hw-acc-crypto-avx2",
             "armv8_c_lib",
             "gcm-aes-arm32-neon_c_lib",
             "gcm-aes-aarch64_c_lib",
-            // NOTE: The intel-gcm-* libraries are already automatically
-            //       included in freebl_static as source files.
+            "gcm-aes-x86_c_lib",
+            "hw-acc-crypto-avx",
+            "hw-acc-crypto-avx2",
+            "intel-gcm-wrap_c_lib",
+            "intel-gcm-s_lib",
+            "sha-x86_c_lib",
         ];
 
         // Build rules are complex, so simply check the lib directory to see if
