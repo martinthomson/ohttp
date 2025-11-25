@@ -85,8 +85,12 @@ mod nss {
         };
         let libclang_dir = mozbuild_root.join("clang").join("lib");
         if libclang_dir.is_dir() {
-            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
-            println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+            let libclang_dir = libclang_dir.to_str().unwrap();
+            unsafe {
+                // SAFETY: this is a single-threaded program
+                env::set_var("LIBCLANG_PATH", libclang_dir);
+            }
+            println!("rustc-env:LIBCLANG_PATH={libclang_dir}");
         } else {
             println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
         }
@@ -394,8 +398,8 @@ mod nss {
     #[cfg(feature = "gecko")]
     fn setup_for_gecko() -> Vec<String> {
         use mozbuild::{
-            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
             TOPOBJDIR,
+            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         };
 
         let mut flags: Vec<String> = Vec::new();
@@ -478,7 +482,9 @@ mod nss {
                 "NSS_DIR path (obtained via `env`) does not exist: {}",
                 nss_dir.display()
             );
-            panic!("It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!");
+            panic!(
+                "It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!"
+            );
         }
 
         let lib_dir = nss_dir.join("lib");

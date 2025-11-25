@@ -9,8 +9,8 @@ use std::{
 
 use bhttp::{Message, Mode, StatusCode};
 use ohttp::{
-    hpke::{Aead, Kdf, Kem},
     KeyConfig, Server as OhttpServer, SymmetricSuite,
+    hpke::{Aead, Kdf, Kem},
 };
 use structopt::StructOpt;
 use warp::Filter;

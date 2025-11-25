@@ -149,9 +149,10 @@ impl Encrypt for Aead {
 mod test {
     use super::SequenceNumber;
     use crate::{
+        Aead, Mode, NONCE_LEN,
         crypto::{Decrypt, Encrypt},
         hpke::Aead as AeadId,
-        init, Aead, Mode, NONCE_LEN,
+        init,
     };
 
     /// Check that the first invocation of encryption matches expected values.

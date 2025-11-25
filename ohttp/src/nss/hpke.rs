@@ -10,8 +10,8 @@ pub use sys::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
 
 use super::{
     super::hpke::{Aead, Kdf, Kem},
-    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
-    p11::{sys, Item, PrivateKey, PublicKey, Slot, SymKey},
+    err::{Error, sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res},
+    p11::{Item, PrivateKey, PublicKey, Slot, SymKey, sys},
 };
 use crate::{
     crypto::{Decrypt, Encrypt},
@@ -70,7 +70,9 @@ pub trait Exporter {
 }
 
 unsafe fn destroy_hpke_context(cx: *mut sys::HpkeContext) {
-    sys::PK11_HPKE_DestroyContext(cx, sys::PRBool::from(true));
+    unsafe {
+        sys::PK11_HPKE_DestroyContext(cx, sys::PRBool::from(true));
+    }
 }
 
 scoped_ptr!(HpkeContext, sys::HpkeContext, destroy_hpke_context);
@@ -324,7 +326,7 @@ pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
 
 #[cfg(test)]
 mod test {
-    use super::{generate_key_pair, Config, HpkeContext, HpkeR, HpkeS};
+    use super::{Config, HpkeContext, HpkeR, HpkeS, generate_key_pair};
     use crate::{
         crypto::{Decrypt, Encrypt},
         hpke::Aead,

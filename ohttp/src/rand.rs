@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use ::rand::{rng, RngCore};
+use ::rand::{RngCore, rng};
 
 #[must_use]
 pub fn random(size: usize) -> Vec<u8> {

@@ -3,7 +3,7 @@
 use std::io::{self, BufRead, Write};
 
 use bhttp::{Message, Mode};
-use ohttp::{init, ClientRequest};
+use ohttp::{ClientRequest, init};
 
 fn main() {
     init();

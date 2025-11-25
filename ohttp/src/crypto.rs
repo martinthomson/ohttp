@@ -1,4 +1,4 @@
-use crate::{err::Res, AeadId};
+use crate::{AeadId, err::Res};
 
 pub trait Decrypt {
     fn open(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>>;
