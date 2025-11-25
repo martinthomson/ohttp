@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     err::{Error, Res},
-    nss::err::{secstatus_to_res, Error as NssError},
+    nss::err::{Error as NssError, secstatus_to_res},
 };
 
 #[allow(
@@ -31,11 +31,11 @@ pub mod sys {
 }
 
 use sys::{
-    PK11ObjectType, PK11SlotInfo, PK11SymKey, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
+    CK_ATTRIBUTE_TYPE, CKA_VALUE, PK11_ExtractKeyValue, PK11_FreeSlot, PK11_FreeSymKey,
     PK11_GenerateRandom, PK11_GetInternalSlot, PK11_GetKeyData, PK11_ReadRawAttribute,
-    PK11_ReferenceSymKey, PRBool, SECITEM_FreeItem, SECItem, SECItemType, SECKEYPrivateKey,
-    SECKEYPublicKey, SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey, CKA_VALUE,
-    CK_ATTRIBUTE_TYPE,
+    PK11_ReferenceSymKey, PK11ObjectType, PK11SlotInfo, PK11SymKey, PRBool, SECITEM_FreeItem,
+    SECItem, SECItemType, SECKEY_DestroyPrivateKey, SECKEY_DestroyPublicKey, SECKEYPrivateKey,
+    SECKEYPublicKey,
 };
 
 macro_rules! scoped_ptr {
@@ -249,7 +249,9 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
 }
 
 unsafe fn destroy_secitem(item: *mut SECItem) {
-    SECITEM_FreeItem(item, PRBool::from(true));
+    unsafe {
+        SECITEM_FreeItem(item, PRBool::from(true));
+    }
 }
 scoped_ptr!(Item, SECItem, destroy_secitem, noptr);
 
@@ -271,10 +273,10 @@ impl Item {
     /// # Safety
     /// This dereferences two pointers.  It doesn't get much less safe.
     pub(crate) unsafe fn into_vec(self) -> Vec<u8> {
-        let b = self.ptr.as_ref().unwrap();
+        let b = unsafe { self.ptr.as_ref() }.unwrap();
         // Sanity check the type, as some types don't count bytes in `Item::len`.
         assert_eq!(b.type_, SECItemType::siBuffer);
-        let slc = std::slice::from_raw_parts(b.data, usize::try_from(b.len).unwrap());
+        let slc = unsafe { std::slice::from_raw_parts(b.data, usize::try_from(b.len).unwrap()) };
         Vec::from(slc)
     }
 }

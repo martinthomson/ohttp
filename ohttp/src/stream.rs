@@ -12,12 +12,12 @@ use futures::{AsyncRead, AsyncWrite};
 use pin_project::pin_project;
 
 use crate::{
-    build_info,
+    Aead, Error, HpkeConfig, HpkeR, HpkeS, KeyConfig, KeyId, Mode, PublicKey, REQUEST_HEADER_LEN,
+    SymKey, build_info,
     crypto::{Decrypt, Encrypt},
     entropy,
     err::Res,
-    export_secret, make_aead, random, Aead, Error, HpkeConfig, HpkeR, HpkeS, KeyConfig, KeyId,
-    Mode, PublicKey, SymKey, REQUEST_HEADER_LEN,
+    export_secret, make_aead, random,
 };
 
 /// The info string for a chunked request.
@@ -824,8 +824,8 @@ mod test {
     use sync_async::{Dribble, Pipe, SplitAt, Stutter, SyncRead, SyncResolve, Unadapt};
 
     use crate::{
-        test::{init, make_config, REQUEST, RESPONSE},
         ClientRequest, Server,
+        test::{REQUEST, RESPONSE, init, make_config},
     };
 
     #[test]

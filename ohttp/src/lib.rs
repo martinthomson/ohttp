@@ -33,10 +33,11 @@ use log::trace;
 
 #[cfg(feature = "nss")]
 use crate::nss::{
+    PublicKey, SymKey,
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
-    random, PublicKey, SymKey,
+    random,
 };
 #[cfg(feature = "stream")]
 use crate::stream::{ClientRequest as StreamClient, ServerRequest as ServerRequestStream};
@@ -49,10 +50,10 @@ use crate::{err::Res, hpke::Aead as AeadId};
 use crate::{
     rand::random,
     rh::{
+        SymKey,
         aead::{Aead, Mode, NONCE_LEN},
         hkdf::{Hkdf, KeyMechanism},
         hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS, PublicKey},
-        SymKey,
     },
 };
 
@@ -329,10 +330,10 @@ mod test {
     use log::trace;
 
     use crate::{
+        ClientRequest, Error, KeyConfig, KeyId, Server,
         config::SymmetricSuite,
         err::Res,
         hpke::{Aead, Kdf, Kem},
-        ClientRequest, Error, KeyConfig, KeyId, Server,
     };
 
     pub const KEY_ID: KeyId = 1;

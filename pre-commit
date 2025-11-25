@@ -71,7 +71,7 @@ check() {
 }
 versions=(stable)
 if [[ "$1" == "all" ]]; then
-    versions+=(1.82.0)
+    versions+=(1.85.0)
 fi
 for v in "${versions[@]}"; do
     check "clippy" cargo "+$v" clippy --tests -F stream

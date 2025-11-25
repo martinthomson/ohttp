@@ -1,8 +1,8 @@
 use std::{borrow::BorrowMut, convert::TryFrom, io};
 
 use crate::{
-    err::{Error, Res},
     ReadSeek,
+    err::{Error, Res},
 };
 
 #[allow(clippy::cast_possible_truncation)]
@@ -98,7 +98,7 @@ mod test {
     use std::io::Cursor;
 
     use super::{read_varint, write_varint};
-    use crate::{rw::read_vec, Error};
+    use crate::{Error, rw::read_vec};
 
     #[test]
     fn basics() {

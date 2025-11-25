@@ -85,8 +85,12 @@ mod nss {
         };
         let libclang_dir = mozbuild_root.join("clang").join("lib");
         if libclang_dir.is_dir() {
-            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
-            println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+            let libclang_dir = libclang_dir.to_str().unwrap();
+            unsafe {
+                // SAFETY: this is a single-threaded program
+                env::set_var("LIBCLANG_PATH", libclang_dir);
+            }
+            println!("rustc-env:LIBCLANG_PATH={libclang_dir}");
         } else {
             println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
         }
@@ -161,15 +165,15 @@ mod nss {
         // NSS optionally builds platform-specific acceleration libraries as
         // separate static libraries.
         let accel_libs = &[
-            "gcm-aes-x86_c_lib",
-            "sha-x86_c_lib",
-            "hw-acc-crypto-avx",
-            "hw-acc-crypto-avx2",
             "armv8_c_lib",
             "gcm-aes-arm32-neon_c_lib",
             "gcm-aes-aarch64_c_lib",
-            // NOTE: The intel-gcm-* libraries are already automatically
-            //       included in freebl_static as source files.
+            "gcm-aes-x86_c_lib",
+            "hw-acc-crypto-avx",
+            "hw-acc-crypto-avx2",
+            "intel-gcm-wrap_c_lib",
+            "intel-gcm-s_lib",
+            "sha-x86_c_lib",
         ];
 
         // Build rules are complex, so simply check the lib directory to see if
@@ -266,16 +270,13 @@ mod nss {
         builder = builder.clang_arg("-v");
 
         builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-        if env::consts::OS == "windows" {
-            builder = builder.clang_arg("-DWIN");
-        } else if env::consts::OS == "macos" {
-            builder = builder.clang_arg("-DDARWIN");
-        } else if env::consts::OS == "linux" {
-            builder = builder.clang_arg("-DLINUX");
-        } else if env::consts::OS == "android" {
-            builder = builder.clang_arg("-DLINUX");
-            builder = builder.clang_arg("-DANDROID");
-        }
+        builder = match env::consts::OS {
+            "windows" => builder.clang_arg("-DWIN"),
+            "macos" => builder.clang_arg("-DDARWIN"),
+            "linux" => builder.clang_arg("-DLINUX"),
+            "android" => builder.clang_arg("-DLINUX").clang_arg("-DANDROID"),
+            _ => builder,
+        };
         if bindings.cplusplus {
             builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
         }
@@ -394,8 +395,8 @@ mod nss {
     #[cfg(feature = "gecko")]
     fn setup_for_gecko() -> Vec<String> {
         use mozbuild::{
-            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
             TOPOBJDIR,
+            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         };
 
         let mut flags: Vec<String> = Vec::new();
@@ -478,7 +479,9 @@ mod nss {
                 "NSS_DIR path (obtained via `env`) does not exist: {}",
                 nss_dir.display()
             );
-            panic!("It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!");
+            panic!(
+                "It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!"
+            );
         }
 
         let lib_dir = nss_dir.join("lib");

@@ -7,17 +7,17 @@ use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 
 #[cfg(feature = "nss")]
 use crate::nss::{
-    hpke::{generate_key_pair, Config as HpkeConfig, HpkeR},
     PrivateKey, PublicKey,
+    hpke::{Config as HpkeConfig, HpkeR, generate_key_pair},
 };
 #[cfg(feature = "rust-hpke")]
 use crate::rh::hpke::{
-    derive_key_pair, generate_key_pair, Config as HpkeConfig, HpkeR, PrivateKey, PublicKey,
+    Config as HpkeConfig, HpkeR, PrivateKey, PublicKey, derive_key_pair, generate_key_pair,
 };
 use crate::{
+    KeyId,
     err::{Error, Res},
     hpke::{Aead as AeadId, Kdf, Kem},
-    KeyId,
 };
 
 /// A tuple of KDF and AEAD identifiers.
@@ -286,8 +286,9 @@ mod test {
     use std::iter::zip;
 
     use crate::{
+        Error, KeyConfig, KeyId, SymmetricSuite,
         hpke::{Aead, Kdf, Kem},
-        init, Error, KeyConfig, KeyId, SymmetricSuite,
+        init,
     };
 
     const KEY_ID: KeyId = 1;
