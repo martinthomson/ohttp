@@ -285,9 +285,6 @@ enum ChunkReader {
 }
 
 impl ChunkReader {
-    /// The number of zero-length chunks we accept before aborting.
-    const ZERO_LENGTH_DOS_LIMIT: usize = 1;
-
     fn length() -> Self {
         Self::Length {
             len: [0; 8],
@@ -425,7 +422,11 @@ impl ChunkReader {
                     };
                     output[..pt.len()].copy_from_slice(&pt);
                     *self = Self::length();
-                    Some(Poll::Ready(Ok(pt.len())))
+                    if pt.is_empty() {
+                        Some(ioerror(Error::ZeroLengthRead))
+                    } else {
+                        Some(Poll::Ready(Ok(pt.len())))
+                    }
                 } else {
                     buf.reserve_exact(*length);
                     buf.extend_from_slice(&output[..r]);
@@ -478,8 +479,6 @@ impl ChunkReader {
             return Poll::Ready(Ok(delivered));
         }
 
-        let mut zero_length_chunks = 0;
-
         while !matches!(self, Self::Done) {
             if let Some(res) = self.read_length(src.as_mut(), cx, cipher) {
                 return res;
@@ -487,13 +486,6 @@ impl ChunkReader {
 
             // Read data.
             if let Some(res) = self.read_into_output(src.as_mut(), cx, cipher, output) {
-                if matches!(res, Poll::Ready(Ok(0))) {
-                    zero_length_chunks += 1;
-                    if zero_length_chunks > Self::ZERO_LENGTH_DOS_LIMIT {
-                        return ioerror(Error::ZeroLengthRead);
-                    }
-                    continue;
-                }
                 return res;
             }
 
@@ -552,16 +544,10 @@ impl ChunkReader {
                 if last {
                     *self = Self::Done;
                 } else {
-                    *self = Self::length();
                     if pt.is_empty() {
-                        // We can't return zero length, as that means "end of stream".
-                        // So read the next chunk if this one was empty.
-                        zero_length_chunks += 1;
-                        if !last && zero_length_chunks > Self::ZERO_LENGTH_DOS_LIMIT {
-                            return ioerror(Error::ZeroLengthRead);
-                        }
-                        continue;
+                        return ioerror(Error::ZeroLengthRead);
                     }
+                    *self = Self::length();
                 }
                 pt.len()
             };
@@ -1141,14 +1127,11 @@ mod test {
         let mut projection = pin.project();
         let mut cx = noop_context();
 
-        // Write out two zero-length chunks before finalizing the request.
-        for _ in 0..2 {
-            let f = ChunkWriter::flush(&mut projection, &mut cx);
-            assert!(f.is_ready());
-            assert!(projection.buf.is_empty());
-            ChunkWriter::write_chunk(&mut projection, &mut cx, &[], false).unwrap();
-        }
-
+        // Write out a zero-length chunk before finalizing the request.
+        let f = ChunkWriter::flush(&mut projection, &mut cx);
+        assert!(f.is_ready());
+        assert!(projection.buf.is_empty());
+        ChunkWriter::write_chunk(&mut projection, &mut cx, &[], false).unwrap();
         client_request.write_all(REQUEST).sync_resolve().unwrap();
 
         let mut buf = Vec::new();

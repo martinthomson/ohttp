@@ -42,7 +42,7 @@ pub enum Error {
     #[error("writes are not supported after closing")]
     WriteAfterClose,
     #[cfg(feature = "stream")]
-    #[error("read too many zero-length chunks")]
+    #[error("read a zero-length chunk")]
     ZeroLengthRead,
 }
 
