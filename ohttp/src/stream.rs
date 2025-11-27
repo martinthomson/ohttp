@@ -1112,7 +1112,7 @@ mod test {
         assert_eq!(server_request.sync_read_to_end(), LONG_REQUEST);
     }
 
-    /// Check that repeated zero-length chunks are treated as invalid.
+    /// Check that zero-length chunks are treated as invalid.
     #[test]
     fn dos_zero_length() {
         init();
