@@ -168,8 +168,8 @@ mod nss {
             "armv8_c_lib",
             "gcm-aes-arm32-neon_c_lib",
             "gcm-aes-aarch64_c_lib",
-            // NOTE: The intel-gcm-* libraries are already automatically
-            //       included in freebl_static as source files.
+            "intel-gcm-s_lib",
+            "intel-gcm-wrap_c_lib",
         ];
 
         // Build rules are complex, so simply check the lib directory to see if
