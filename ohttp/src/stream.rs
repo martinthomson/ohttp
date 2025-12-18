@@ -28,6 +28,7 @@ pub(crate) const LABEL_RESPONSE: &[u8] = b"message/bhttp chunked response";
 const MAX_CHUNK_PLAINTEXT: usize = 1 << 14;
 const CHUNK_AAD: &[u8] = b"";
 const FINAL_CHUNK_AAD: &[u8] = b"final";
+const MAX_ENTROPY_LEN: usize = 32;
 
 #[allow(clippy::unnecessary_wraps)]
 fn ioerror<T, E>(e: E) -> Poll<IoResult<T>>
@@ -241,9 +242,49 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: Default::default(),
                 read: 0,
             },
+        })
+    }
+
+    /// Get an decapsulator that can be used to process the response.
+    ///
+    /// While this can be used while sending the request,
+    /// doing so creates a risk of revealing unwanted information to the gateway.
+    /// That includes the round trip time between client and gateway,
+    /// which might reveal information about the location of the client.
+    pub fn response_decapsulator(&self) -> Res<ClientResponseDecapsulator> {
+        let enc = self.writer.cipher.enc()?;
+        let secret = export_secret(
+            &self.writer.cipher,
+            LABEL_RESPONSE,
+            self.writer.cipher.config(),
+        )?;
+        Ok(ClientResponseDecapsulator {
+            config: self.writer.cipher.config(),
+            state: ClientResponseState::Header {
+                enc,
+                secret,
+                nonce: Default::default(),
+                read: 0,
+            },
+        })
+    }
+}
+
+pub struct ClientResponseDecapsulator {
+    config: HpkeConfig,
+    state: ClientResponseState,
+}
+
+impl ClientResponseDecapsulator {
+    /// Get an object that can be used to process the response.
+    pub fn decapsulate_response<S>(self, src: S) -> Res<ClientResponse<S>> {
+        Ok(ClientResponse {
+            src,
+            config: self.config,
+            state: self.state,
         })
     }
 }
@@ -620,6 +661,50 @@ impl<S> ServerRequest<S> {
             },
         })
     }
+
+    /// Get a response encapsulator that creates a response to the given request.
+    ///
+    /// This fails with an error if the request header hasn't been processed.
+    /// This condition is not exposed through a future anywhere,
+    /// but you can wait for the first byte of data.
+    pub fn response_encapsulator(&self) -> Res<ServerResponseEncapsulator> {
+        let ServerRequestState::Body { hpke, state: _ } = &self.state else {
+            return Err(Error::NotReady);
+        };
+
+        let response_nonce = random(entropy(hpke.config()));
+        let aead = make_aead(
+            Mode::Encrypt,
+            hpke.config(),
+            &export_secret(hpke, LABEL_RESPONSE, hpke.config())?,
+            &self.enc,
+            &response_nonce,
+        )?;
+
+        Ok(ServerResponseEncapsulator {
+            aead,
+            response_nonce,
+        })
+    }
+}
+
+pub struct ServerResponseEncapsulator {
+    aead: Aead,
+    response_nonce: Vec<u8>,
+}
+
+impl ServerResponseEncapsulator {
+    /// Get a response that wraps the given async write instance.
+    pub fn encapsulate_response<D>(self, dst: D) -> Res<ServerResponse<D>> {
+        Ok(ServerResponse {
+            writer: ChunkWriter {
+                dst,
+                cipher: self.aead,
+                buf: self.response_nonce,
+                closed: false,
+            },
+        })
+    }
 }
 
 impl<S: AsyncRead> ServerRequest<S> {
@@ -740,7 +825,7 @@ enum ClientResponseState {
     Header {
         enc: Vec<u8>,
         secret: SymKey,
-        nonce: [u8; 16],
+        nonce: [u8; MAX_ENTROPY_LEN],
         read: usize,
     },
     Body {

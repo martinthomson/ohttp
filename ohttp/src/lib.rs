@@ -219,8 +219,8 @@ impl Server {
 
     /// Remove encapsulation on a streamed request.
     #[cfg(feature = "stream")]
-    pub fn decapsulate_stream<S>(self, src: S) -> ServerRequestStream<S> {
-        ServerRequestStream::new(self.config, src)
+    pub fn decapsulate_stream<S>(&self, src: S) -> ServerRequestStream<S> {
+        ServerRequestStream::new(self.config.clone(), src)
     }
 }
 
