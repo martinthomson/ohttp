@@ -12,7 +12,8 @@ use futures::{
 };
 use pin_project::pin_project;
 
-fn noop_context() -> Context<'static> {
+#[must_use]
+pub fn noop_context() -> Context<'static> {
     use std::{
         ptr::null,
         task::{RawWaker, RawWakerVTable, Waker},
