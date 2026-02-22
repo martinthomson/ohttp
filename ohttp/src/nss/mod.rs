@@ -9,10 +9,10 @@ pub mod hpke;
 
 use std::{ptr::null, sync::OnceLock};
 
-use err::secstatus_to_res;
 pub use err::Error;
+use err::secstatus_to_res;
 
-pub use self::p11::{random, PrivateKey, PublicKey, SymKey};
+pub use self::p11::{PrivateKey, PublicKey, SymKey, random};
 
 #[allow(clippy::pedantic, non_upper_case_globals, clippy::upper_case_acronyms)]
 mod nss_init {

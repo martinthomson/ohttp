@@ -89,8 +89,8 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::{init, SECFailure, SECSuccess},
-        secstatus_to_res, PRErrorCode, PR_SetError,
+        super::{SECFailure, SECSuccess, init},
+        PR_SetError, PRErrorCode, secstatus_to_res,
     };
 
     fn set_error_code(code: PRErrorCode) {

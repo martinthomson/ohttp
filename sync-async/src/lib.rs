@@ -2,13 +2,13 @@ use std::{
     cmp::min,
     future::Future,
     io::Result as IoResult,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll},
 };
 
 use futures::{
-    io::{ReadHalf, WriteHalf},
     AsyncRead, AsyncReadExt, AsyncWrite, TryStream, TryStreamExt,
+    io::{ReadHalf, WriteHalf},
 };
 use pin_project::pin_project;
 

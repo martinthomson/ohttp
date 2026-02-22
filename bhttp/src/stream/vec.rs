@@ -1,13 +1,13 @@
 use std::{
     future::Future,
     mem,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll},
 };
 
-use futures::{io::AsyncRead, FutureExt};
+use futures::{FutureExt, io::AsyncRead};
 
-use super::int::{read_varint, ReadVarint};
+use super::int::{ReadVarint, read_varint};
 use crate::{Error, Res};
 
 /// A reader for a varint-length-prefixed buffer.
@@ -32,7 +32,7 @@ impl<S> ReadVec<S> {
     /// if this is called after the length is read.
     pub fn limit(&mut self, limit: u64) {
         usize::try_from(limit).expect("cannot set a limit larger than usize::MAX");
-        if let Self::ReadLen { ref mut cap, .. } = self {
+        if let Self::ReadLen { cap, .. } = self {
             *cap = limit;
         } else {
             panic!("cannot set a limit once the size has been read");
@@ -122,7 +122,7 @@ mod test {
     use futures::AsyncRead;
     use sync_async::SyncResolve;
 
-    use crate::{rw::write_varint as sync_write_varint, stream::vec::read_vec, Error};
+    use crate::{Error, rw::write_varint as sync_write_varint, stream::vec::read_vec};
 
     const FILL_VALUE: u8 = 90;
 

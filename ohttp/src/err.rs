@@ -49,4 +49,11 @@ impl From<std::num::TryFromIntError> for Error {
     }
 }
 
+// If this happens, it's a programming error in this crate.
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(_v: std::array::TryFromSliceError) -> Self {
+        Self::Internal
+    }
+}
+
 pub type Res<T> = Result<T, Error>;
