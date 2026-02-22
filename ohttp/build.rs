@@ -161,6 +161,7 @@ mod nss {
         // NSS optionally builds platform-specific acceleration libraries as
         // separate static libraries.
         let accel_libs = &[
+            // Pre-NSS-3.121 names
             "gcm-aes-x86_c_lib",
             "sha-x86_c_lib",
             "hw-acc-crypto-avx",
@@ -170,6 +171,11 @@ mod nss {
             "gcm-aes-aarch64_c_lib",
             "intel-gcm-s_lib",
             "intel-gcm-wrap_c_lib",
+            // NSS 3.121+ renamed/introduced names
+            "gcm",
+            "ghash-aes-x86_c_lib",
+            "ghash-aes-arm32-neon_c_lib",
+            "ghash-aes-aarch64_c_lib",
         ];
 
         // Build rules are complex, so simply check the lib directory to see if
