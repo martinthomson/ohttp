@@ -14,7 +14,7 @@ readme.workspace = true
 
 [features]
 default = ["client", "server", "rust-hpke", "stream"]
-app-svc = ["nss"]
+app-svc = ["nss", "dep:mozbuild"]
 client = []
 external-sqlite = []
 gecko = ["nss", "dep:mozbuild"]
