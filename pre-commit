@@ -71,7 +71,7 @@ check() {
 }
 versions=(stable)
 if [[ "$1" == "all" ]]; then
-    versions+=(1.83.0)
+    versions+=($(sed -ne 's/^rust-version *= *"//;T;s/".*$//;p' Cargo.toml))
 fi
 for v in "${versions[@]}"; do
     check "clippy" cargo "+$v" clippy --tests -F stream
