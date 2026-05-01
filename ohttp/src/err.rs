@@ -41,6 +41,9 @@ pub enum Error {
     #[cfg(feature = "stream")]
     #[error("writes are not supported after closing")]
     WriteAfterClose,
+    #[cfg(feature = "stream")]
+    #[error("read a zero-length chunk")]
+    ZeroLengthRead,
 }
 
 impl From<std::num::TryFromIntError> for Error {
