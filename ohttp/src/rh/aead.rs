@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use aead::{AeadMut, Key, KeyInit, Nonce, Payload};
+use aead::{Aead as _, KeyInit, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use chacha20poly1305::ChaCha20Poly1305;
 
@@ -34,21 +34,17 @@ enum AeadEngine {
 impl AeadEngine {
     fn encrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
         let tag = match self {
-            Self::Aes128Gcm(e) => e.encrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
-            Self::Aes256Gcm(e) => e.encrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
-            Self::ChaCha20Poly1305(e) => {
-                e.encrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
-            }
+            Self::Aes128Gcm(e) => e.encrypt(&nonce.try_into().unwrap(), pt)?,
+            Self::Aes256Gcm(e) => e.encrypt(&nonce.try_into().unwrap(), pt)?,
+            Self::ChaCha20Poly1305(e) => e.encrypt(&nonce.try_into().unwrap(), pt)?,
         };
         Ok(tag)
     }
     fn decrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
         let tag = match self {
-            Self::Aes128Gcm(e) => e.decrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
-            Self::Aes256Gcm(e) => e.decrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
-            Self::ChaCha20Poly1305(e) => {
-                e.decrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
-            }
+            Self::Aes128Gcm(e) => e.decrypt(&nonce.try_into().unwrap(), pt)?,
+            Self::Aes256Gcm(e) => e.decrypt(&nonce.try_into().unwrap(), pt)?,
+            Self::ChaCha20Poly1305(e) => e.decrypt(&nonce.try_into().unwrap(), pt)?,
         };
         Ok(tag)
     }
@@ -73,14 +69,14 @@ impl Aead {
         nonce_base: [u8; NONCE_LEN],
     ) -> Res<Self> {
         let aead = match algorithm {
-            AeadId::Aes128Gcm => AeadEngine::Aes128Gcm(Box::new(Aes128Gcm::new(
-                Key::<Aes128Gcm>::from_slice(key.as_ref()),
-            ))),
-            AeadId::Aes256Gcm => AeadEngine::Aes256Gcm(Box::new(Aes256Gcm::new(
-                Key::<Aes256Gcm>::from_slice(key.as_ref()),
-            ))),
+            AeadId::Aes128Gcm => {
+                AeadEngine::Aes128Gcm(Box::new(Aes128Gcm::new(key.as_ref().try_into().unwrap())))
+            }
+            AeadId::Aes256Gcm => {
+                AeadEngine::Aes256Gcm(Box::new(Aes256Gcm::new(key.as_ref().try_into().unwrap())))
+            }
             AeadId::ChaCha20Poly1305 => AeadEngine::ChaCha20Poly1305(Box::new(
-                ChaCha20Poly1305::new(Key::<ChaCha20Poly1305>::from_slice(key.as_ref())),
+                ChaCha20Poly1305::new(key.as_ref().try_into().unwrap()),
             )),
         };
         Ok(Self {
