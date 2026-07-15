@@ -54,9 +54,7 @@ mod nss {
     }
 
     fn is_debug() -> bool {
-        env::var("DEBUG")
-            .map(|d| d.parse::<bool>().unwrap_or(false))
-            .unwrap_or(false)
+        env::var("DEBUG").is_ok_and(|d| d.parse::<bool>().unwrap_or(false))
     }
 
     // bindgen needs access to libclang.
@@ -398,14 +396,12 @@ mod nss {
         flags
     }
 
-    #[cfg(feature = "gecko")]
+    #[cfg(any(feature = "gecko", feature = "app-svc"))]
     fn setup_for_gecko() -> Vec<String> {
         use mozbuild::{
             TOPOBJDIR,
             config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         };
-
-        let mut flags: Vec<String> = Vec::new();
 
         let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;
         let libs = if fold_libs {
@@ -449,7 +445,7 @@ mod nss {
             );
         }
 
-        flags = BINDGEN_SYSTEM_FLAGS
+        let mut flags: Vec<String> = BINDGEN_SYSTEM_FLAGS
             .iter()
             .chain(&NSPR_CFLAGS)
             .chain(&NSS_CFLAGS)
@@ -469,13 +465,21 @@ mod nss {
         flags
     }
 
-    #[cfg(not(feature = "gecko"))]
+    #[cfg(not(any(feature = "gecko", feature = "app-svc")))]
     fn setup_for_gecko() -> Vec<String> {
         unreachable!()
     }
 
     #[cfg(feature = "app-svc")]
     fn setup_for_app_svc() -> Vec<String> {
+        // The `app-svc` feature is better described as "detect whether
+        // we are in application-services or gecko dynamically".
+        // Like the application-services `rc_crypto` crate, we assume that
+        // `MOZ_TOPOBJDIR` being set means we are in gecko.
+        if env::var_os("MOZ_TOPOBJDIR").is_some() {
+            return setup_for_gecko();
+        }
+
         // Locate the NSS libraries that application_services is using.
         // NOTE: This directory has a slightly different layout than then normal
         //       'dist' directory that NSS builds output.

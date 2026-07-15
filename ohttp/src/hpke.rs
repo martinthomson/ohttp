@@ -31,8 +31,8 @@ macro_rules! convert_enum {
 
 convert_enum! {
 pub enum Kem {
-    X25519Sha256 = 32,
-    P256Sha256 = 16,
+    X25519Sha256 = 32,    // DHKEM(X25519, HKDF-SHA256) = 0x0020
+    P256Sha256 = 16,      // DHKEM(P-256, HKDF-SHA256) = 0x0010
 }
 }
 

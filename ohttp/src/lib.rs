@@ -384,6 +384,32 @@ mod test {
     }
 
     #[test]
+    fn request_response_p256() {
+        init();
+
+        // P-256 HPKE may not be supported by all backends (e.g., NSS lacks P-256 HPKE).
+        if !super::HpkeConfig::new(Kem::P256Sha256, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+            return;
+        }
+
+        let server_config = KeyConfig::new(KEY_ID, Kem::P256Sha256, Vec::from(SYMMETRIC)).unwrap();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("P256 Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("P256 Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
+    }
+
+    #[test]
     fn two_requests() {
         init();
 

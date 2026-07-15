@@ -96,7 +96,7 @@ impl Aead {
                 slot.ptr(),
                 Self::mech(algorithm),
                 sys::PK11Origin::PK11_OriginUnwrap,
-                sys::CK_ATTRIBUTE_TYPE::from(sys::CKA_ENCRYPT | sys::CKA_DECRYPT),
+                sys::CK_ATTRIBUTE_TYPE::from(CKA_NSS_MESSAGE | sys::CKA_ENCRYPT | sys::CKA_DECRYPT),
                 &mut super::p11::Item::wrap(key),
                 std::ptr::null_mut(),
             )
@@ -133,14 +133,14 @@ impl Aead {
         })
     }
 
-    fn do_open(ctx: &Context, aad: &[u8], ct: &[u8], nonce: &mut [u8], mech: u32) -> Res<Vec<u8>> {
+    fn do_open(ctx: &Context, aad: &[u8], ct: &[u8], nonce: &mut [u8], gfun: u32) -> Res<Vec<u8>> {
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::Truncated)?;
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 ctx.ptr(),
-                CK_GENERATOR_FUNCTION::from(mech),
+                CK_GENERATOR_FUNCTION::from(gfun),
                 c_int_len(NONCE_LEN - COUNTER_LEN), // Fixed portion of the nonce.
                 nonce.as_mut_ptr(),
                 c_int_len(nonce.len()),

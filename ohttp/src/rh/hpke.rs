@@ -1,8 +1,7 @@
 use std::ops::Deref;
 
 use ::hpke as rust_hpke;
-use ::inout::InOutBuf;
-use ::rand::rng;
+use ::hpke::inout::InOutBuf;
 use hpke::kem::DhP256HkdfSha256;
 use log::trace;
 use rust_hpke::{
@@ -46,8 +45,9 @@ impl Config {
     }
 
     pub fn supported(self) -> bool {
-        // TODO support more options
-        self.kdf == Kdf::HkdfSha256 && matches!(self.aead, Aead::Aes128Gcm | Aead::ChaCha20Poly1305)
+        matches!(self.kem, Kem::X25519Sha256 | Kem::P256Sha256)
+            && self.kdf == Kdf::HkdfSha256
+            && matches!(self.aead, Aead::Aes128Gcm | Aead::ChaCha20Poly1305)
     }
 }
 
@@ -213,11 +213,9 @@ pub struct HpkeS {
 impl HpkeS {
     /// Create a new context that uses the KEM mode for sending.
     pub fn new(config: Config, pk_r: &PublicKey, info: &[u8]) -> Res<Self> {
-        let mut csprng = rng();
-
         macro_rules! dispatch_hpkes_new {
             {
-                ($c:expr, $pk:expr, $csprng:expr): [$( $(#[$meta:meta])* {
+                ($c:expr, $pk:expr): [$( $(#[$meta:meta])* {
                     $kemid:path => $kem:path,
                     $kdfid:path => $kdf:path,
                     $aeadid:path => $aead:path,
@@ -235,11 +233,10 @@ impl HpkeS {
                             },
                             $pke(pk_r),
                         ) => {
-                            let (enc, context) = setup_sender::<$aead, $kdf, $kem, _>(
+                            let (enc, context) = setup_sender::<$aead, $kdf, $kem>(
                                 &OpModeS::Base,
                                 pk_r,
                                 info,
-                                $csprng,
                             )?;
                             (
                                 $ctxt1($ctxt2($ctxt3(Box::new(context)))),
@@ -252,7 +249,7 @@ impl HpkeS {
             };
         }
 
-        let (context, enc) = dispatch_hpkes_new! { (config, pk_r, &mut csprng): [
+        let (context, enc) = dispatch_hpkes_new! { (config, pk_r): [
             {
                 Kem::X25519Sha256 => X25519HkdfSha256,
                 Kdf::HkdfSha256 => HkdfSha256,
@@ -584,14 +581,13 @@ impl Deref for HpkeR {
 /// Generate a key pair for the identified KEM.
 #[allow(clippy::unnecessary_wraps)]
 pub fn generate_key_pair(kem: Kem) -> Res<(PrivateKey, PublicKey)> {
-    let mut csprng = rng();
     let (sk, pk) = match kem {
         Kem::X25519Sha256 => {
-            let (sk, pk) = X25519HkdfSha256::gen_keypair(&mut csprng);
+            let (sk, pk) = X25519HkdfSha256::gen_keypair();
             (PrivateKey::X25519(sk), PublicKey::X25519(pk))
         }
         Kem::P256Sha256 => {
-            let (sk, pk) = DhP256HkdfSha256::gen_keypair(&mut csprng);
+            let (sk, pk) = DhP256HkdfSha256::gen_keypair();
             (PrivateKey::P256(sk), PublicKey::P256(pk))
         }
     };
@@ -672,7 +668,12 @@ mod test {
     }
 
     #[test]
-    fn seal_open_p256() {
+    fn seal_open_gcm_p256() {
         seal_open(Aead::Aes128Gcm, Kem::P256Sha256);
+    }
+
+    #[test]
+    fn seal_open_chacha_p256() {
+        seal_open(Aead::ChaCha20Poly1305, Kem::P256Sha256);
     }
 }
