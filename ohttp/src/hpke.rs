@@ -33,6 +33,7 @@ convert_enum! {
 pub enum Kem {
     X25519Sha256 = 32,    // DHKEM(X25519, HKDF-SHA256) = 0x0020
     P256Sha256 = 16,      // DHKEM(P-256, HKDF-SHA256) = 0x0010
+    XWing = 0x647a,       // X-Wing (MLKEM768-X25519) = 0x647a
 }
 }
 
@@ -42,6 +43,7 @@ impl Kem {
         match self {
             Self::X25519Sha256 => 32,
             Self::P256Sha256 => 65,
+            Self::XWing => 1120,
         }
     }
 
@@ -50,6 +52,7 @@ impl Kem {
         match self {
             Self::X25519Sha256 => 32,
             Self::P256Sha256 => 65,
+            Self::XWing => 1216,
         }
     }
 }

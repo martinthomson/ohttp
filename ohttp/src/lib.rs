@@ -410,6 +410,32 @@ mod test {
     }
 
     #[test]
+    fn request_response_xwing() {
+        init();
+
+        // X-Wing HPKE is only available with the rust-hpke backend.
+        if !super::HpkeConfig::new(Kem::XWing, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+            return;
+        }
+
+        let server_config = KeyConfig::new(KEY_ID, Kem::XWing, Vec::from(SYMMETRIC)).unwrap();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("X-Wing Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("X-Wing Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
+    }
+
+    #[test]
     fn two_requests() {
         init();
 
