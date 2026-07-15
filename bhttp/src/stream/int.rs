@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll},
 };
 
@@ -82,7 +82,7 @@ impl<S: AsyncRead + Unpin> Future for ReadVarint<S> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut();
-        if let Self::First(ref mut src) = this.get_mut() {
+        if let Self::First(src) = this.get_mut() {
             let mut buf = [0; 1];
             let src_ref = src.as_mut().unwrap();
             if let Poll::Ready(res) = pin!(src_ref).poll_read(cx, &mut buf[..]) {

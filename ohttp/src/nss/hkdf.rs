@@ -5,12 +5,12 @@ use log::trace;
 use super::{
     super::hpke::{Aead, Kdf},
     p11::{
-        sys::{
-            self, CKA_DERIVE, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_AES_GCM,
-            CKM_CHACHA20_POLY1305, CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_SHA256, CK_BBOOL,
-            CK_HKDF_PARAMS, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_OBJECT_HANDLE, CK_ULONG,
-        },
         ParamItem, SymKey,
+        sys::{
+            self, CK_BBOOL, CK_HKDF_PARAMS, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_OBJECT_HANDLE,
+            CK_ULONG, CKA_DERIVE, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_AES_GCM,
+            CKM_CHACHA20_POLY1305, CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_SHA256,
+        },
     },
 };
 use crate::err::Res;

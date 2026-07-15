@@ -9,12 +9,12 @@ use log::trace;
 use super::{
     err::secstatus_to_res,
     p11::{
-        sys::{
-            self, PK11Context, PK11_AEADOp, PK11_CreateContextBySymKey, PRBool, CKA_DECRYPT,
-            CKA_ENCRYPT, CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM,
-            CKM_CHACHA20_POLY1305, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE,
-        },
         Item, SymKey,
+        sys::{
+            self, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE, CKA_DECRYPT,
+            CKA_ENCRYPT, CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM,
+            CKM_CHACHA20_POLY1305, PK11_AEADOp, PK11_CreateContextBySymKey, PK11Context, PRBool,
+        },
     },
 };
 use crate::{
@@ -43,7 +43,9 @@ where
 }
 
 unsafe fn destroy_aead_context(ctx: *mut PK11Context) {
-    sys::PK11_DestroyContext(ctx, PRBool::from(true));
+    unsafe {
+        sys::PK11_DestroyContext(ctx, PRBool::from(true));
+    }
 }
 scoped_ptr!(Context, PK11Context, destroy_aead_context);
 
@@ -229,7 +231,7 @@ impl Encrypt for Aead {
 mod test {
     use super::{
         super::{super::hpke::Aead as AeadId, init},
-        Aead, Mode, SequenceNumber, NONCE_LEN,
+        Aead, Mode, NONCE_LEN, SequenceNumber,
     };
     use crate::crypto::{Decrypt, Encrypt};
 

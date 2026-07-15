@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 
-use aead::{AeadMut, Key, KeyInit, Nonce, Payload};
-use aes_gcm::{Aes128Gcm, Aes256Gcm};
-use chacha20poly1305::ChaCha20Poly1305;
+use ::aead::{Aead as _, Key, KeyInit, Nonce, Payload};
+use ::aes_gcm::{Aes128Gcm, Aes256Gcm};
+use ::chacha20poly1305::ChaCha20Poly1305;
 
 use super::SymKey;
 use crate::{
@@ -34,20 +34,20 @@ enum AeadEngine {
 impl AeadEngine {
     fn encrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
         let tag = match self {
-            Self::Aes128Gcm(e) => e.encrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
-            Self::Aes256Gcm(e) => e.encrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
+            Self::Aes128Gcm(e) => e.encrypt(&Nonce::<Aes128Gcm>::try_from(nonce)?, pt)?,
+            Self::Aes256Gcm(e) => e.encrypt(&Nonce::<Aes256Gcm>::try_from(nonce)?, pt)?,
             Self::ChaCha20Poly1305(e) => {
-                e.encrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
+                e.encrypt(&Nonce::<ChaCha20Poly1305>::try_from(nonce)?, pt)?
             }
         };
         Ok(tag)
     }
     fn decrypt(&mut self, nonce: &[u8], pt: Payload) -> Res<Vec<u8>> {
         let tag = match self {
-            Self::Aes128Gcm(e) => e.decrypt(Nonce::<Aes128Gcm>::from_slice(nonce), pt)?,
-            Self::Aes256Gcm(e) => e.decrypt(Nonce::<Aes256Gcm>::from_slice(nonce), pt)?,
+            Self::Aes128Gcm(e) => e.decrypt(&Nonce::<Aes128Gcm>::try_from(nonce)?, pt)?,
+            Self::Aes256Gcm(e) => e.decrypt(&Nonce::<Aes256Gcm>::try_from(nonce)?, pt)?,
             Self::ChaCha20Poly1305(e) => {
-                e.decrypt(Nonce::<ChaCha20Poly1305>::from_slice(nonce), pt)?
+                e.decrypt(&Nonce::<ChaCha20Poly1305>::try_from(nonce)?, pt)?
             }
         };
         Ok(tag)
@@ -74,14 +74,18 @@ impl Aead {
     ) -> Res<Self> {
         let aead = match algorithm {
             AeadId::Aes128Gcm => AeadEngine::Aes128Gcm(Box::new(Aes128Gcm::new(
-                Key::<Aes128Gcm>::from_slice(key.as_ref()),
+                &Key::<Aes128Gcm>::try_from(key.as_ref())?,
             ))),
             AeadId::Aes256Gcm => AeadEngine::Aes256Gcm(Box::new(Aes256Gcm::new(
-                Key::<Aes256Gcm>::from_slice(key.as_ref()),
+                &Key::<Aes256Gcm>::try_from(key.as_ref())?,
             ))),
-            AeadId::ChaCha20Poly1305 => AeadEngine::ChaCha20Poly1305(Box::new(
-                ChaCha20Poly1305::new(Key::<ChaCha20Poly1305>::from_slice(key.as_ref())),
-            )),
+            AeadId::ChaCha20Poly1305 => {
+                AeadEngine::ChaCha20Poly1305(Box::new(ChaCha20Poly1305::new(&Key::<
+                    ChaCha20Poly1305,
+                >::try_from(
+                    key.as_ref()
+                )?)))
+            }
         };
         Ok(Self {
             mode,
@@ -145,9 +149,10 @@ impl Encrypt for Aead {
 mod test {
     use super::SequenceNumber;
     use crate::{
+        Aead, Mode, NONCE_LEN,
         crypto::{Decrypt, Encrypt},
         hpke::Aead as AeadId,
-        init, Aead, Mode, NONCE_LEN,
+        init,
     };
 
     /// Check that the first invocation of encryption matches expected values.

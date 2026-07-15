@@ -33,10 +33,11 @@ use log::trace;
 
 #[cfg(feature = "nss")]
 use crate::nss::{
+    PublicKey, SymKey,
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
     hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
-    random, PublicKey, SymKey,
+    random,
 };
 #[cfg(feature = "stream")]
 use crate::stream::{ClientRequest as StreamClient, ServerRequest as ServerRequestStream};
@@ -49,10 +50,10 @@ use crate::{err::Res, hpke::Aead as AeadId};
 use crate::{
     rand::random,
     rh::{
+        SymKey,
         aead::{Aead, Mode, NONCE_LEN},
         hkdf::{Hkdf, KeyMechanism},
         hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS, PublicKey},
-        SymKey,
     },
 };
 
@@ -329,10 +330,10 @@ mod test {
     use log::trace;
 
     use crate::{
+        ClientRequest, Error, KeyConfig, KeyId, Server,
         config::SymmetricSuite,
         err::Res,
         hpke::{Aead, Kdf, Kem},
-        ClientRequest, Error, KeyConfig, KeyId, Server,
     };
 
     pub const KEY_ID: KeyId = 1;
@@ -399,6 +400,32 @@ mod test {
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
         trace!("P256 Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
+    }
+
+    #[test]
+    fn request_response_xwing() {
+        init();
+
+        // X-Wing HPKE is only available with the rust-hpke backend.
+        if !super::HpkeConfig::new(Kem::XWing, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+            return;
+        }
+
+        let server_config = KeyConfig::new(KEY_ID, Kem::XWing, Vec::from(SYMMETRIC)).unwrap();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("X-Wing Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("X-Wing Encapsulated Request: {}", hex::encode(&enc_request));
 
         let (request, server_response) = server.decapsulate(&enc_request).unwrap();
         assert_eq!(&request[..], REQUEST);

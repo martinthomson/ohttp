@@ -5,16 +5,16 @@ use std::{
     cmp::min,
     io::{Cursor, Error as IoError, Result as IoResult},
     mem,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll},
 };
 
-use futures::{stream::unfold, AsyncRead, Stream, TryStreamExt};
+use futures::{AsyncRead, Stream, TryStreamExt, stream::unfold};
 
 use crate::{
+    COOKIE, ControlData, Error, Field, FieldSection, Header, InformationalResponse, Message, Mode,
     err::Res,
     stream::{int::read_varint, vec::read_vec},
-    ControlData, Error, Field, FieldSection, Header, InformationalResponse, Message, Mode, COOKIE,
 };
 mod int;
 mod vec;
@@ -414,7 +414,7 @@ mod test {
     use futures::TryStreamExt;
     use sync_async::{Dribble, SyncRead, SyncResolve, SyncTryCollect};
 
-    use crate::{stream::AsyncReadMessage, Error, Message};
+    use crate::{Error, Message, stream::AsyncReadMessage};
 
     // Example from Section 5.1 of RFC 9292.
     const REQUEST1: &[u8] = &[

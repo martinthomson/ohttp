@@ -54,8 +54,7 @@ mod nss {
     }
 
     fn is_debug() -> bool {
-        env::var("DEBUG")
-            .is_ok_and(|d| d.parse::<bool>().unwrap_or(false))
+        env::var("DEBUG").is_ok_and(|d| d.parse::<bool>().unwrap_or(false))
     }
 
     // bindgen needs access to libclang.
@@ -84,8 +83,12 @@ mod nss {
         };
         let libclang_dir = mozbuild_root.join("clang").join("lib");
         if libclang_dir.is_dir() {
-            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
-            println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+            let libclang_dir = libclang_dir.to_str().unwrap();
+            unsafe {
+                // SAFETY: this is a single-threaded program
+                env::set_var("LIBCLANG_PATH", libclang_dir);
+            }
+            println!("rustc-env:LIBCLANG_PATH={libclang_dir}");
         } else {
             println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
         }
@@ -271,16 +274,13 @@ mod nss {
         builder = builder.clang_arg("-v");
 
         builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-        if env::consts::OS == "windows" {
-            builder = builder.clang_arg("-DWIN");
-        } else if env::consts::OS == "macos" {
-            builder = builder.clang_arg("-DDARWIN");
-        } else if env::consts::OS == "linux" {
-            builder = builder.clang_arg("-DLINUX");
-        } else if env::consts::OS == "android" {
-            builder = builder.clang_arg("-DLINUX");
-            builder = builder.clang_arg("-DANDROID");
-        }
+        builder = match env::consts::OS {
+            "windows" => builder.clang_arg("-DWIN"),
+            "macos" => builder.clang_arg("-DDARWIN"),
+            "linux" => builder.clang_arg("-DLINUX"),
+            "android" => builder.clang_arg("-DLINUX").clang_arg("-DANDROID"),
+            _ => builder,
+        };
         if bindings.cplusplus {
             builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
         }
@@ -399,8 +399,8 @@ mod nss {
     #[cfg(any(feature = "gecko", feature = "app-svc"))]
     fn setup_for_gecko() -> Vec<String> {
         use mozbuild::{
-            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
             TOPOBJDIR,
+            config::{BINDGEN_SYSTEM_FLAGS, NSPR_CFLAGS, NSS_CFLAGS},
         };
 
         let fold_libs = mozbuild::config::MOZ_FOLD_LIBS;
@@ -489,7 +489,9 @@ mod nss {
                 "NSS_DIR path (obtained via `env`) does not exist: {}",
                 nss_dir.display()
             );
-            panic!("It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!");
+            panic!(
+                "It looks like NSS is not built. Please run `libs/verify-[platform]-environment.sh` in application-services first!"
+            );
         }
 
         let lib_dir = nss_dir.join("lib");
