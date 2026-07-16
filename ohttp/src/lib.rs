@@ -410,6 +410,58 @@ mod test {
     }
 
     #[test]
+    fn request_response_p384() {
+        init();
+
+        // P-384 HPKE is only available with the rust-hpke backend.
+        if !super::HpkeConfig::new(Kem::P384Sha384, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+            return;
+        }
+
+        let server_config = KeyConfig::new(KEY_ID, Kem::P384Sha384, Vec::from(SYMMETRIC)).unwrap();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("P384 Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("P384 Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
+    }
+
+    #[test]
+    fn request_response_p521() {
+        init();
+
+        // P-521 HPKE is only available with the rust-hpke backend.
+        if !super::HpkeConfig::new(Kem::P521Sha512, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+            return;
+        }
+
+        let server_config = KeyConfig::new(KEY_ID, Kem::P521Sha512, Vec::from(SYMMETRIC)).unwrap();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        trace!("P521 Config: {}", hex::encode(&encoded_config));
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        trace!("P521 Encapsulated Request: {}", hex::encode(&enc_request));
+
+        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        assert_eq!(&request[..], REQUEST);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(&response[..], RESPONSE);
+    }
+
+    #[test]
     fn request_response_xwing() {
         init();
 
