@@ -274,7 +274,9 @@ mod nss {
         builder = builder.clang_arg("-v");
 
         builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-        builder = match env::consts::OS {
+        let target_os =
+            env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS must be set by Cargo");
+        builder = match target_os.as_str() {
             "windows" => builder.clang_arg("-DWIN"),
             "macos" => builder.clang_arg("-DDARWIN"),
             "linux" => builder.clang_arg("-DLINUX"),
