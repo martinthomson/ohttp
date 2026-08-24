@@ -167,6 +167,48 @@ pub struct Server {
     config: KeyConfig,
 }
 
+/// Metadata applications can use to detect request replay as described in
+/// [RFC 9458, Section 6.5](https://www.rfc-editor.org/rfc/rfc9458.html#section-6.5).
+///
+/// This metadata is available only for buffered decapsulation. Streaming decapsulation does not
+/// expose replay metadata because the response state can exist before the full body is
+/// authenticated.
+///
+/// Replay storage and rejection policy belong to applications; this crate adds no replay cache.
+#[cfg(feature = "server")]
+pub struct ReplayMetadata {
+    key_id: KeyId,
+    enc: Vec<u8>,
+}
+
+#[cfg(feature = "server")]
+impl ReplayMetadata {
+    /// Returns the key identifier from the validated request header.
+    #[must_use]
+    pub fn key_id(&self) -> KeyId {
+        self.key_id
+    }
+
+    /// Returns the HPKE `enc` value from the request.
+    #[must_use]
+    pub fn enc(&self) -> &[u8] {
+        &self.enc
+    }
+
+    /// Consumes this metadata and returns the key identifier and owned HPKE `enc` value.
+    #[must_use]
+    pub fn into_parts(self) -> (KeyId, Vec<u8>) {
+        (self.key_id, self.enc)
+    }
+}
+
+#[cfg(feature = "server")]
+impl std::fmt::Debug for ReplayMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReplayMetadata")
+    }
+}
+
 #[cfg(feature = "server")]
 impl Server {
     /// Create a new server configuration.
@@ -208,6 +250,26 @@ impl Server {
     /// # Panics
     /// Not as a consequence of this code, but Rust won't know that for sure.
     pub fn decapsulate(&self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
+        let (request, response, _) = self.decapsulate_with_metadata(enc_request)?;
+        Ok((request, response))
+    }
+
+    /// Remove encapsulation on a request and return metadata suitable for application replay
+    /// handling as described in [RFC 9458, Section 6.5](https://www.rfc-editor.org/rfc/rfc9458.html#section-6.5).
+    ///
+    /// Metadata is returned only after HPKE successfully opens and authenticates the encapsulated
+    /// OHTTP request ciphertext; this does not authenticate the sender's identity.
+    ///
+    /// This metadata API applies to buffered decapsulation only. Streaming decapsulation does not
+    /// expose replay metadata.
+    ///
+    /// Replay storage and rejection policy belong to applications; this crate adds no replay cache.
+    /// # Panics
+    /// Not as a consequence of this code, but Rust won't know that for sure.
+    pub fn decapsulate_with_metadata(
+        &self,
+        enc_request: &[u8],
+    ) -> Res<(Vec<u8>, ServerResponse, ReplayMetadata)> {
         if enc_request.len() <= REQUEST_HEADER_LEN {
             return Err(Error::Truncated);
         }
@@ -215,10 +277,16 @@ impl Server {
         let (mut hpke, enc) = self.decode_request_header(&mut r, INFO_REQUEST)?;
 
         let request = hpke.open(&[], &enc_request[usize::try_from(r.position())?..])?;
-        Ok((request, ServerResponse::new(&hpke, &enc)?))
+        let response = ServerResponse::new(&hpke, &enc)?;
+        let metadata = ReplayMetadata {
+            key_id: self.config.key_id,
+            enc,
+        };
+        Ok((request, response, metadata))
     }
 
     /// Remove encapsulation on a streamed request.
+    /// Streaming decapsulation does not expose replay metadata.
     #[cfg(feature = "stream")]
     pub fn decapsulate_stream<S>(self, src: S) -> ServerRequestStream<S> {
         ServerRequestStream::new(self.config, src)
@@ -248,7 +316,7 @@ fn make_aead(mode: Mode, cfg: HpkeConfig, secret: &SymKey, enc: &[u8], nonce: &[
 }
 
 /// An object for encapsulating responses.
-/// The only way to obtain one of these is through `Server::decapsulate()`.
+/// The only way to obtain one of these is through `Server` request decapsulation methods.
 #[cfg(feature = "server")]
 pub struct ServerResponse {
     response_nonce: Vec<u8>,
@@ -325,7 +393,7 @@ impl ClientResponse {
 
 #[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
-    use std::{fmt::Debug, io::ErrorKind};
+    use std::{collections::HashSet, fmt::Debug, io::ErrorKind};
 
     use log::trace;
 
@@ -384,6 +452,106 @@ mod test {
     }
 
     #[test]
+    fn request_response_with_replay_metadata() {
+        init();
+
+        let server_config = make_config();
+        let server = Server::new(server_config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
+        let enc_end = super::REQUEST_HEADER_LEN + KEM.n_enc();
+        let expected_enc = Vec::from(&enc_request[super::REQUEST_HEADER_LEN..enc_end]);
+
+        let (request, server_response, metadata) =
+            server.decapsulate_with_metadata(&enc_request).unwrap();
+        drop(enc_request);
+
+        assert_eq!(request, REQUEST);
+        assert_eq!(metadata.key_id(), KEY_ID);
+        assert_eq!(metadata.enc(), expected_enc);
+        assert_eq!(format!("{metadata:?}"), "ReplayMetadata");
+        let (key_id, enc) = metadata.into_parts();
+        assert_eq!(key_id, KEY_ID);
+        assert_eq!(enc, expected_enc);
+
+        let enc_response = server_response.encapsulate(RESPONSE).unwrap();
+        let response = client_response.decapsulate(&enc_response).unwrap();
+        assert_eq!(response, RESPONSE);
+    }
+
+    #[test]
+    fn replay_metadata_is_not_returned_for_truncated_request() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+
+        assert!(server.decapsulate_with_metadata(&[]).is_err());
+    }
+
+    #[test]
+    fn replay_metadata_is_not_returned_for_unknown_key() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut enc_request, _) = client.encapsulate(REQUEST).unwrap();
+        enc_request[0] = KEY_ID.wrapping_add(1);
+
+        assert!(server.decapsulate_with_metadata(&enc_request).is_err());
+    }
+
+    #[test]
+    fn replay_metadata_is_not_returned_for_corrupted_ciphertext() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut enc_request, _) = client.encapsulate(REQUEST).unwrap();
+        *enc_request.last_mut().unwrap() ^= 1;
+
+        assert!(server.decapsulate_with_metadata(&enc_request).is_err());
+    }
+
+    #[test]
+    fn replay_metadata_is_stable_for_repeated_decapsulation() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request, _) = client.encapsulate(REQUEST).unwrap();
+
+        let (_, _, first_metadata) = server.decapsulate_with_metadata(&enc_request).unwrap();
+        let (_, _, second_metadata) = server.decapsulate_with_metadata(&enc_request).unwrap();
+        let mut replay_keys = HashSet::from([first_metadata.into_parts()]);
+
+        assert!(!replay_keys.insert(second_metadata.into_parts()));
+    }
+
+    #[test]
+    fn replay_metadata_distinguishes_independent_encapsulations() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        let client1 = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request1, _) = client1.encapsulate(REQUEST).unwrap();
+        let client2 = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (enc_request2, _) = client2.encapsulate(REQUEST).unwrap();
+
+        let (_, _, metadata1) = server.decapsulate_with_metadata(&enc_request1).unwrap();
+        let (_, _, metadata2) = server.decapsulate_with_metadata(&enc_request2).unwrap();
+        let (_, enc1) = metadata1.into_parts();
+        let (_, enc2) = metadata2.into_parts();
+
+        assert_ne!(enc1, enc2);
+    }
+
+    #[test]
     fn request_response_p256() {
         init();
 
@@ -400,9 +568,14 @@ mod test {
         let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
         let (enc_request, client_response) = client.encapsulate(REQUEST).unwrap();
         trace!("P256 Encapsulated Request: {}", hex::encode(&enc_request));
+        let enc_end = super::REQUEST_HEADER_LEN + Kem::P256Sha256.n_enc();
+        let expected_enc = &enc_request[super::REQUEST_HEADER_LEN..enc_end];
 
-        let (request, server_response) = server.decapsulate(&enc_request).unwrap();
+        let (request, server_response, metadata) =
+            server.decapsulate_with_metadata(&enc_request).unwrap();
         assert_eq!(&request[..], REQUEST);
+        assert_eq!(metadata.key_id(), KEY_ID);
+        assert_eq!(metadata.enc(), expected_enc);
 
         let enc_response = server_response.encapsulate(RESPONSE).unwrap();
         let response = client_response.decapsulate(&enc_response).unwrap();
