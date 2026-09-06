@@ -8,11 +8,13 @@ on:
     paths-ignore: ["*.md", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
+  # Cargo.lock is not tracked; resolve dependencies against the declared MSRV.
+  CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
   RUST_BACKTRACE: 1
 
 jobs:
   check:
-    name: Continuous Integration
+    name: Continuous Integration (${{ matrix.rust }}, ${{ matrix.hpke }}, ${{ matrix.stream.name }})
     runs-on: ubuntu-latest
     env:
       NSS_DIR: ${{ github.workspace }}/nss
@@ -25,7 +27,15 @@ jobs:
         rust:
           - 1.86.0 # MSRV
           - stable
-
+        stream:
+          - name: stream-off
+            workspace_features: client,server
+            client_features: client
+            server_features: server
+          - name: stream-on
+            workspace_features: client,server,stream
+            client_features: client,stream
+            server_features: server,stream
     steps:
       - uses: actions/checkout@v4
 
@@ -69,11 +79,16 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust }} build --tests --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} build --tests --no-default-features --features ${{ matrix.hpke }},${{ matrix.stream.workspace_features }}
 
       - name: Run Tests
         run: |
-          cargo +${{ matrix.rust }} test --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} test --no-default-features --features ${{ matrix.hpke }},${{ matrix.stream.workspace_features }}
+
+      - name: Check isolated OHTTP feature sets
+        run: |
+          cargo +${{ matrix.rust }} check -p ohttp --no-default-features --features ${{ matrix.hpke }},${{ matrix.stream.client_features }}
+          cargo +${{ matrix.rust }} check -p ohttp --no-default-features --features ${{ matrix.hpke }},${{ matrix.stream.server_features }}
 
       - name: Check formatting
         if: ${{ success() || failure() }}
@@ -83,4 +98,4 @@ jobs:
       - name: Clippy
         if: ${{ success() || failure() }}
         run: |
-          cargo clippy --tests --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} clippy --tests --no-default-features --features ${{ matrix.hpke }},${{ matrix.stream.workspace_features }}

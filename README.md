@@ -43,6 +43,28 @@ The `ohttp` crate has the following features:
   of [chunked Oblivious HTTP messages](https://datatracker.ietf.org/doc/html/draft-ietf-ohai-chunked-ohttp).
   This is disabled by default until it stabilizes.
 
+### Staged request decoding
+
+Servers can inspect request headers before selecting a key or doing cryptographic
+work. `Server::decode_header()` returns a borrowed buffered request with
+`header()` accessors for the raw key, KEM, KDF, and AEAD identifiers. Its `enc()`
+method borrows the encapsulated key without initializing HPKE; then
+`request.decapsulate(&server)` validates and decrypts the request using the
+selected server. Header information remains available if either operation fails.
+
+With the `stream` feature, `Server::decode_header_stream()` reads only the fixed
+header. `request.decode_enc().await` reads only the encapsulated key, and
+`request.decapsulate(&server)` enables subsequent body reads.
+
+Header inspection is not authentication. Applications can reject a known `enc`
+before decryption, but must authenticate new requests before recording them as
+accepted, with atomic acceptance before application side effects. Scope replay
+state to the actual server key generation, not just the one-byte key ID. Streaming
+response readiness does not imply that the complete request was authenticated.
+Replay storage, retention, and synchronization remain application responsibilities;
+see [RFC 9458, Section 6.5](https://www.rfc-editor.org/rfc/rfc9458.html#section-6.5)
+and the `Server::decode_header()` API example.
+
 
 ## Utilities
 
