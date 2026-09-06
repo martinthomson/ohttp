@@ -20,12 +20,7 @@ mod rh;
 #[cfg(feature = "stream")]
 mod stream;
 
-use std::{
-    cmp::max,
-    convert::TryFrom,
-    io::{Cursor, Read},
-    mem::size_of,
-};
+use std::{cmp::max, convert::TryFrom, mem::size_of};
 
 use byteorder::{NetworkEndian, WriteBytesExt};
 use crypto::{Decrypt, Encrypt};
@@ -40,7 +35,9 @@ use crate::nss::{
     random,
 };
 #[cfg(feature = "stream")]
-use crate::stream::{ClientRequest as StreamClient, ServerRequest as ServerRequestStream};
+use crate::stream::ClientRequest as StreamClient;
+#[cfg(feature = "stream")]
+pub use crate::stream::ServerRequest as ServerRequestStream;
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
@@ -66,6 +63,121 @@ const INFO_NONCE: &[u8] = b"nonce";
 
 /// The type of a key identifier.
 pub type KeyId = u8;
+
+/// The fixed fields of an encapsulated request header.
+///
+/// These are untrusted wire values.
+/// Unknown algorithm identifiers are preserved so that applications can inspect the header even
+/// when key selection or decapsulation fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestHeader {
+    bytes: [u8; REQUEST_HEADER_LEN],
+}
+
+impl RequestHeader {
+    pub(crate) fn decode(input: &[u8]) -> Res<Self> {
+        let bytes = input.get(..REQUEST_HEADER_LEN).ok_or(Error::Truncated)?;
+        Ok(Self {
+            bytes: bytes.try_into()?,
+        })
+    }
+
+    /// The key identifier advertised by the request, before validation.
+    #[must_use]
+    pub const fn key_id(&self) -> KeyId {
+        self.bytes[0]
+    }
+
+    /// The raw HPKE KEM identifier, including unrecognized values.
+    #[must_use]
+    pub const fn kem_id(&self) -> u16 {
+        u16::from_be_bytes([self.bytes[1], self.bytes[2]])
+    }
+
+    /// The raw HPKE KDF identifier, including unrecognized values.
+    #[must_use]
+    pub const fn kdf_id(&self) -> u16 {
+        u16::from_be_bytes([self.bytes[3], self.bytes[4]])
+    }
+
+    /// The raw HPKE AEAD identifier, including unrecognized values.
+    #[must_use]
+    pub const fn aead_id(&self) -> u16 {
+        u16::from_be_bytes([self.bytes[5], self.bytes[6]])
+    }
+
+    pub(crate) fn enc_len(self) -> Res<usize> {
+        Ok(hpke::Kem::try_from(self.kem_id())?.n_enc())
+    }
+
+    pub(crate) fn validate(self, key: &KeyConfig) -> Res<HpkeConfig> {
+        if self.key_id() != key.key_id {
+            return Err(Error::KeyId);
+        }
+        if hpke::Kem::try_from(self.kem_id())? != key.kem {
+            return Err(Error::InvalidKem);
+        }
+        key.select(SymmetricSuite::new(
+            hpke::Kdf::try_from(self.kdf_id())?,
+            AeadId::try_from(self.aead_id())?,
+        ))
+    }
+
+    pub(crate) fn receiver(self, key: &KeyConfig, enc: &[u8], label: &[u8]) -> Res<HpkeR> {
+        let config = self.validate(key)?;
+        let info = build_info(label, self.key_id(), config)?;
+        HpkeR::new(
+            config,
+            &key.pk,
+            key.sk.as_ref().ok_or(Error::InvalidKeyType)?,
+            enc,
+            &info,
+        )
+    }
+}
+
+/// A buffered request whose fixed header has been decoded, but not authenticated.
+///
+/// This borrows the original request. Inspect [`Self::header`] to select a server, then
+/// [`Self::enc`] to check for a known replay before invoking [`Self::decapsulate`].
+/// Neither inspection operation initializes HPKE or decrypts the body. Both remain available
+/// after a decapsulation error.
+#[cfg(feature = "server")]
+pub struct ServerRequest<'a> {
+    header: RequestHeader,
+    payload: &'a [u8],
+}
+
+#[cfg(feature = "server")]
+impl<'a> ServerRequest<'a> {
+    /// The unvalidated fixed header, including unknown algorithm identifiers.
+    #[must_use]
+    pub fn header(&self) -> &RequestHeader {
+        &self.header
+    }
+
+    /// Borrow the encapsulated key from the request without initializing HPKE.
+    ///
+    /// Only the KEM identifier must be recognized to determine its length; the selected crypto
+    /// backend need not support that KEM. Unknown KEMs return [`Error::Unsupported`], and
+    /// incomplete encapsulated keys return [`Error::Truncated`]. The fixed header is retained.
+    pub fn enc(&self) -> Res<&'a [u8]> {
+        self.payload
+            .get(..self.header.enc_len()?)
+            .ok_or(Error::Truncated)
+    }
+
+    /// Validate the header against the selected server and authenticate and decrypt the body.
+    ///
+    /// This does not consume the request, including on failure. Successful decapsulation
+    /// authenticates the ciphertext and does not prevent replay.
+    pub fn decapsulate(&self, server: &Server) -> Res<(Vec<u8>, ServerResponse)> {
+        let enc = self.enc()?;
+        let mut hpke = self.header.receiver(&server.config, enc, INFO_REQUEST)?;
+        let request = hpke.open(&[], &self.payload[enc.len()..])?;
+        Ok((request, ServerResponse::new(&hpke, enc)?))
+    }
+}
 
 pub fn init() {
     #[cfg(feature = "nss")]
@@ -183,39 +295,70 @@ impl Server {
         &self.config
     }
 
-    fn decode_request_header(&self, r: &mut Cursor<&[u8]>, label: &[u8]) -> Res<(HpkeR, Vec<u8>)> {
-        let hpke_config = self.config.decode_hpke_config(r)?;
-        let sym = SymmetricSuite::new(hpke_config.kdf(), hpke_config.aead());
-        let config = self.config.select(sym)?;
-        let info = build_info(label, self.config.key_id, hpke_config)?;
-
-        let mut enc = vec![0; config.kem().n_enc()];
-        r.read_exact(&mut enc)?;
-
-        Ok((
-            HpkeR::new(
-                config,
-                &self.config.pk,
-                self.config.sk.as_ref().unwrap(),
-                &enc,
-                &info,
-            )?,
-            enc,
-        ))
+    /// Decode only the fixed header of a buffered request, without selecting a key.
+    ///
+    /// An application can select an active key using the returned header and reject a known
+    /// replay using `enc` before any HPKE setup or decryption. Do not record an unauthenticated
+    /// `enc` as an accepted request: authenticate first, then atomically check and record it
+    /// before dispatching plaintext to the application.
+    ///
+    /// Replay state belongs to a particular key generation, not a globally unique one-byte
+    /// key ID. Retention, eviction, and distributed synchronization are application policies;
+    /// see [RFC 9458, Section 6.5](https://www.rfc-editor.org/rfc/rfc9458.html#section-6.5).
+    ///
+    /// This example holds exclusive access through authentication and acceptance. Each cache
+    /// is replaced together with its server key. A concurrent implementation must provide the
+    /// same atomic acceptance guarantee before application side effects.
+    ///
+    /// ```
+    /// use std::collections::{HashMap, HashSet};
+    /// use ohttp::{Error, KeyId, Server, ServerResponse};
+    ///
+    /// struct ActiveKey {
+    ///     server: Server,
+    ///     accepted: HashSet<Vec<u8>>,
+    /// }
+    ///
+    /// fn accept(
+    ///     keys: &mut HashMap<KeyId, ActiveKey>,
+    ///     input: &[u8],
+    /// ) -> Result<Option<(Vec<u8>, ServerResponse)>, Error> {
+    ///     let request = Server::decode_header(input)?;
+    ///     let key = keys.get_mut(&request.header().key_id()).ok_or(Error::KeyId)?;
+    ///     let enc = request.enc()?;
+    ///     if key.accepted.contains(enc) {
+    ///         return Ok(None);
+    ///     }
+    ///     let result = request.decapsulate(&key.server)?;
+    ///     key.accepted.insert(enc.to_vec());
+    ///     Ok(Some(result))
+    /// }
+    /// ```
+    pub fn decode_header(enc_request: &[u8]) -> Res<ServerRequest<'_>> {
+        Ok(ServerRequest {
+            header: RequestHeader::decode(enc_request)?,
+            payload: &enc_request[REQUEST_HEADER_LEN..],
+        })
     }
 
     /// Remove encapsulation on a request.
-    /// # Panics
-    /// Not as a consequence of this code, but Rust won't know that for sure.
+    ///
+    /// Use [`Self::decode_header`] to select a key or inspect `enc` before decryption.
     pub fn decapsulate(&self, enc_request: &[u8]) -> Res<(Vec<u8>, ServerResponse)> {
-        if enc_request.len() <= REQUEST_HEADER_LEN {
-            return Err(Error::Truncated);
-        }
-        let mut r = Cursor::new(enc_request);
-        let (mut hpke, enc) = self.decode_request_header(&mut r, INFO_REQUEST)?;
+        Self::decode_header(enc_request)?.decapsulate(self)
+    }
 
-        let request = hpke.open(&[], &enc_request[usize::try_from(r.position())?..])?;
-        Ok((request, ServerResponse::new(&hpke, &enc)?))
+    /// Decode only the fixed header of a streamed request, without selecting a key.
+    ///
+    /// This consumes exactly the fixed header, leaving `enc` and the body unread. Use
+    /// [`ServerRequestStream::decode_enc`] to read the encapsulated key, inspect it for replay,
+    /// then [`ServerRequestStream::decapsulate`] to start cryptographic processing.
+    /// Pinned readers can be supplied as `Pin<&mut S>` or `Pin<Box<S>>`.
+    #[cfg(feature = "stream")]
+    pub async fn decode_header_stream<S: futures::AsyncRead + Unpin>(
+        src: S,
+    ) -> Res<ServerRequestStream<S>> {
+        ServerRequestStream::decode_header(src).await
     }
 
     /// Remove encapsulation on a streamed request.
@@ -248,7 +391,7 @@ fn make_aead(mode: Mode, cfg: HpkeConfig, secret: &SymKey, enc: &[u8], nonce: &[
 }
 
 /// An object for encapsulating responses.
-/// The only way to obtain one of these is through `Server::decapsulate()`.
+/// Obtained after successful buffered request decapsulation.
 #[cfg(feature = "server")]
 pub struct ServerResponse {
     response_nonce: Vec<u8>,

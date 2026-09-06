@@ -2,18 +2,18 @@
 
 use std::{
     cmp::min,
-    io::{Cursor, Error as IoError, Result as IoResult},
+    io::{Error as IoError, ErrorKind, Result as IoResult},
     mem,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use futures::{AsyncRead, AsyncWrite};
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite};
 use pin_project::pin_project;
 
 use crate::{
     Aead, Error, HpkeConfig, HpkeR, HpkeS, KeyConfig, KeyId, Mode, PublicKey, REQUEST_HEADER_LEN,
-    SymKey, build_info,
+    RequestHeader, SymKey, build_info,
     crypto::{Decrypt, Encrypt},
     entropy,
     err::Res,
@@ -557,15 +557,14 @@ impl ChunkReader {
 }
 
 enum ServerRequestState {
-    HpkeConfig {
-        buf: [u8; 7],
+    Header {
+        buf: [u8; REQUEST_HEADER_LEN],
         read: usize,
     },
     Enc {
-        config: HpkeConfig,
-        info: Vec<u8>,
         read: usize,
     },
+    EncComplete,
     Body {
         hpke: HpkeR,
         state: ChunkReader,
@@ -576,7 +575,8 @@ enum ServerRequestState {
 pub struct ServerRequest<S> {
     #[pin]
     src: S,
-    key_config: KeyConfig,
+    key_config: Option<KeyConfig>,
+    header: Option<RequestHeader>,
     enc: Vec<u8>,
     state: ServerRequestState,
 }
@@ -585,19 +585,60 @@ impl<S> ServerRequest<S> {
     pub fn new(key_config: KeyConfig, src: S) -> Self {
         Self {
             src,
-            key_config,
+            key_config: Some(key_config),
+            header: None,
             enc: Vec::new(),
-            state: ServerRequestState::HpkeConfig {
-                buf: [0; 7],
+            state: ServerRequestState::Header {
+                buf: [0; REQUEST_HEADER_LEN],
                 read: 0,
             },
         }
     }
 
+    /// Get the unvalidated fixed header, if it has been completely read.
+    #[must_use]
+    pub fn header(&self) -> Option<&RequestHeader> {
+        self.header.as_ref()
+    }
+
+    /// Get the complete encapsulated key without initializing HPKE.
+    pub fn enc(&self) -> Res<&[u8]> {
+        match &self.state {
+            ServerRequestState::EncComplete | ServerRequestState::Body { .. } => Ok(&self.enc),
+            ServerRequestState::Header { .. } | ServerRequestState::Enc { .. } => {
+                Err(Error::NotReady)
+            }
+        }
+    }
+
+    /// Initialize HPKE after the header and encapsulated key have been inspected.
+    ///
+    /// This validates the selected key and suite, but does not read or authenticate the body.
+    /// The header and complete `enc` remain accessible on failure. Once started, decapsulation
+    /// cannot be restarted; further calls return [`Error::NotReady`].
+    #[cfg(feature = "server")]
+    pub fn decapsulate(&mut self, server: &crate::Server) -> Res<()> {
+        if !matches!(&self.state, ServerRequestState::EncComplete) {
+            return Err(Error::NotReady);
+        }
+
+        let hpke = self.header.ok_or(Error::NotReady)?.receiver(
+            server.config(),
+            &self.enc,
+            INFO_REQUEST,
+        )?;
+        self.state = ServerRequestState::Body {
+            hpke,
+            state: ChunkReader::length(),
+        };
+        Ok(())
+    }
+
     /// Get a response that wraps the given async write instance.
-    /// This fails with an error if the request header hasn't been processed.
-    /// This condition is not exposed through a future anywhere,
-    /// but you can wait for the first byte of data.
+    ///
+    /// This fails until HPKE has been initialized by decapsulation or a lazy read.
+    /// Response readiness does not imply that any body chunk, or the complete request,
+    /// has been authenticated. Applications must enforce their own acceptance policy.
     pub fn response<D>(&self, dst: D) -> Res<ServerResponse<D>> {
         let ServerRequestState::Body { hpke, state: _ } = &self.state else {
             return Err(Error::NotReady);
@@ -622,12 +663,63 @@ impl<S> ServerRequest<S> {
     }
 }
 
+impl<S: AsyncRead + Unpin> ServerRequest<S> {
+    /// Read only the fixed header of a request.
+    ///
+    /// This consumes exactly the fixed header. It does not select a key, read `enc`, or
+    /// initialize HPKE.
+    pub async fn decode_header(mut src: S) -> Res<Self> {
+        let mut buf = [0; REQUEST_HEADER_LEN];
+        src.read_exact(&mut buf).await.map_err(|error| {
+            if error.kind() == ErrorKind::UnexpectedEof {
+                Error::Truncated
+            } else {
+                Error::Io(error)
+            }
+        })?;
+        Ok(Self {
+            src,
+            key_config: None,
+            header: Some(RequestHeader::decode(&buf)?),
+            enc: Vec::new(),
+            state: ServerRequestState::Enc { read: 0 },
+        })
+    }
+
+    /// Read the encapsulated key without initializing HPKE or reading a chunk.
+    pub async fn decode_enc(&mut self) -> Res<&[u8]> {
+        let read = match &mut self.state {
+            ServerRequestState::Header { .. } => return Err(Error::NotReady),
+            ServerRequestState::Enc { read } => read,
+            ServerRequestState::EncComplete | ServerRequestState::Body { .. } => {
+                return Ok(&self.enc);
+            }
+        };
+
+        if self.enc.is_empty() {
+            self.enc
+                .resize(self.header.ok_or(Error::NotReady)?.enc_len()?, 0);
+        }
+
+        while *read < self.enc.len() {
+            let received = self.src.read(&mut self.enc[*read..]).await?;
+            if received == 0 {
+                return Err(Error::Truncated);
+            }
+            *read += received;
+        }
+
+        self.state = ServerRequestState::EncComplete;
+        Ok(&self.enc)
+    }
+}
+
 impl<S: AsyncRead> ServerRequest<S> {
-    fn read_config(
+    fn read_header(
         this: &mut ServerRequestProjection<'_, S>,
         cx: &mut Context<'_>,
     ) -> Option<Poll<IoResult<usize>>> {
-        let ServerRequestState::HpkeConfig { buf, read } = this.state else {
+        let ServerRequestState::Header { buf, read } = this.state else {
             return None;
         };
 
@@ -636,24 +728,12 @@ impl<S: AsyncRead> ServerRequest<S> {
             return res;
         }
 
-        let config = match this
-            .key_config
-            .decode_hpke_config(&mut Cursor::new(&buf[..]))
-        {
-            Ok(cfg) => cfg,
+        let header = match RequestHeader::decode(&buf[..]) {
+            Ok(header) => header,
             Err(e) => return Some(ioerror(e)),
         };
-        let info = match build_info(INFO_REQUEST, this.key_config.key_id, config) {
-            Ok(info) => info,
-            Err(e) => return Some(ioerror(e)),
-        };
-        this.enc.resize(config.kem().n_enc(), 0);
-
-        *this.state = ServerRequestState::Enc {
-            config,
-            info,
-            read: 0,
-        };
+        *this.header = Some(header);
+        *this.state = ServerRequestState::Enc { read: 0 };
         None
     }
 
@@ -661,26 +741,46 @@ impl<S: AsyncRead> ServerRequest<S> {
         this: &mut ServerRequestProjection<'_, S>,
         cx: &mut Context<'_>,
     ) -> Option<Poll<IoResult<usize>>> {
-        let ServerRequestState::Enc { config, info, read } = this.state else {
+        let ServerRequestState::Enc { read } = this.state else {
             return None;
         };
+
+        if this.enc.is_empty() {
+            let len = match this
+                .header
+                .ok_or(Error::NotReady)
+                .and_then(RequestHeader::enc_len)
+            {
+                Ok(len) => len,
+                Err(e) => return Some(ioerror(e)),
+            };
+            this.enc.resize(len, 0);
+        }
 
         let res = ChunkReader::read_fixed(this.src.as_mut(), cx, &mut this.enc[..], read);
         if res.is_some() {
             return res;
         }
 
-        let hpke = match HpkeR::new(
-            *config,
-            &this.key_config.pk,
-            this.key_config.sk.as_ref().unwrap(),
-            this.enc,
-            info,
-        ) {
+        *this.state = ServerRequestState::EncComplete;
+        None
+    }
+
+    fn decapsulate_lazy(
+        this: &mut ServerRequestProjection<'_, S>,
+    ) -> Option<Poll<IoResult<usize>>> {
+        if !matches!(&*this.state, ServerRequestState::EncComplete) {
+            return None;
+        }
+
+        let (Some(header), Some(key_config)) = (this.header.as_ref(), this.key_config.as_ref())
+        else {
+            return Some(ioerror(Error::NotReady));
+        };
+        let hpke = match header.receiver(key_config, this.enc, INFO_REQUEST) {
             Ok(hpke) => hpke,
             Err(e) => return Some(ioerror(e)),
         };
-
         *this.state = ServerRequestState::Body {
             hpke,
             state: ChunkReader::length(),
@@ -696,11 +796,15 @@ impl<S: AsyncRead> AsyncRead for ServerRequest<S> {
         output: &mut [u8],
     ) -> Poll<IoResult<usize>> {
         let mut this = self.project();
-        if let Some(res) = Self::read_config(&mut this, cx) {
+        if let Some(res) = Self::read_header(&mut this, cx) {
             return res;
         }
 
         if let Some(res) = Self::read_enc(&mut this, cx) {
+            return res;
+        }
+
+        if let Some(res) = Self::decapsulate_lazy(&mut this) {
             return res;
         }
 
@@ -810,23 +914,266 @@ impl<S: AsyncRead> AsyncRead for ClientResponse<S> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client", feature = "server"))]
 mod test {
     use std::{
+        cell::Cell,
         io::Result as IoResult,
         pin::Pin,
         task::{Context, Poll},
     };
 
-    use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+    use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, io::WriteHalf};
     use log::trace;
     use pin_project::pin_project;
     use sync_async::{Dribble, Pipe, SplitAt, Stutter, SyncRead, SyncResolve, Unadapt};
 
     use crate::{
-        ClientRequest, Server,
+        ClientRequest, Error, Server,
         test::{REQUEST, RESPONSE, init, make_config},
     };
+
+    #[pin_project]
+    struct Counting<S> {
+        #[pin]
+        src: S,
+        consumed: usize,
+    }
+
+    impl<S> Counting<S> {
+        fn new(src: S) -> Self {
+            Self { src, consumed: 0 }
+        }
+    }
+
+    impl<S: AsyncRead> AsyncRead for Counting<S> {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            let this = self.project();
+            match this.src.poll_read(cx, buf) {
+                Poll::Ready(Ok(read)) => {
+                    *this.consumed += read;
+                    Poll::Ready(Ok(read))
+                }
+                result => result,
+            }
+        }
+    }
+
+    fn stream_request(server: &Server) -> (Vec<u8>, super::ClientRequest<WriteHalf<Pipe>>) {
+        let encoded_config = server.config().encode().unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let mut client_request = client.encapsulate_stream(request_write).unwrap();
+        client_request.write_all(REQUEST).sync_resolve().unwrap();
+        client_request.close().sync_resolve().unwrap();
+        (request_read.sync_read_to_end(), client_request)
+    }
+
+    #[test]
+    fn staged_header_and_enc_stop_at_boundaries() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let (enc_request, _) = stream_request(&server);
+        let pending = Cell::new(0);
+        let mut decode_header = Box::pin(Server::decode_header_stream(Counting::new(
+            Stutter::new(Dribble::new(&enc_request[..])),
+        )));
+        let mut request = decode_header
+            .sync_resolve_with(|_| pending.set(pending.get() + 1))
+            .unwrap();
+        let header = *request.header().unwrap();
+        assert!(pending.get() > 0);
+        assert_eq!(request.src.consumed, super::REQUEST_HEADER_LEN);
+        assert!(matches!(request.enc(), Err(Error::NotReady)));
+
+        let pending = Cell::new(0);
+        let enc = {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            decode_enc
+                .sync_resolve_with(|_| pending.set(pending.get() + 1))
+                .unwrap()
+                .to_vec()
+        };
+        assert!(pending.get() > 0);
+        assert_eq!(enc.len(), header.enc_len().unwrap());
+        assert_eq!(request.src.consumed, super::REQUEST_HEADER_LEN + enc.len());
+        assert_eq!(request.enc().unwrap(), enc.as_slice());
+    }
+
+    #[test]
+    fn staged_enc_decoding_resumes_after_cancellation() {
+        init();
+        let server = Server::new(make_config()).unwrap();
+        let (enc_request, _) = stream_request(&server);
+        let source = Counting::new(Stutter::new(Dribble::new(&enc_request[..])));
+        let mut decode_header = Box::pin(Server::decode_header_stream(source));
+        let mut request = decode_header.sync_resolve().unwrap();
+        let enc_end = super::REQUEST_HEADER_LEN + request.header().unwrap().enc_len().unwrap();
+
+        let mut decode_enc = Box::pin(request.decode_enc());
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        for _ in 0..2 {
+            assert!(decode_enc.as_mut().poll(&mut cx).is_pending());
+        }
+        drop(decode_enc);
+        assert!((super::REQUEST_HEADER_LEN + 1..enc_end).contains(&request.src.consumed));
+
+        {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            assert_eq!(
+                decode_enc.sync_resolve().unwrap(),
+                &enc_request[super::REQUEST_HEADER_LEN..enc_end]
+            );
+        }
+        assert_eq!(request.src.consumed, enc_end);
+        request.decapsulate(&server).unwrap();
+        assert_eq!(request.sync_read_to_end(), REQUEST);
+    }
+
+    #[test]
+    fn staged_header_preserves_unknown_kem_without_reading_enc() {
+        let mut encoded = vec![9, 0xff, 0xff, 0, 1, 0, 1];
+        encoded.extend_from_slice(b"unread");
+        let mut decode_header = Box::pin(Server::decode_header_stream(Counting::new(&encoded[..])));
+        let mut request = decode_header.sync_resolve().unwrap();
+        assert_eq!(request.header().unwrap().key_id(), 9);
+        assert_eq!(request.header().unwrap().kem_id(), 0xffff);
+        assert_eq!(request.header().unwrap().kdf_id(), 1);
+        assert_eq!(request.header().unwrap().aead_id(), 1);
+        assert_eq!(request.src.consumed, super::REQUEST_HEADER_LEN);
+
+        let error = {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            decode_enc.sync_resolve().unwrap_err()
+        };
+        assert!(matches!(error, Error::Unsupported));
+        assert!(request.header().is_some());
+        assert_eq!(request.src.consumed, super::REQUEST_HEADER_LEN);
+    }
+
+    #[test]
+    fn staged_request_resumes_to_response() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let (enc_request, client_request) = stream_request(&server);
+        let mut decode_header = Box::pin(Server::decode_header_stream(Stutter::new(Dribble::new(
+            &enc_request[..],
+        ))));
+        let mut request = decode_header.sync_resolve().unwrap();
+        let enc = {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            decode_enc.sync_resolve().unwrap().to_vec()
+        };
+
+        let mut other_key = make_config();
+        other_key.key_id = request.header().unwrap().key_id().wrapping_add(1);
+        let other_server = Server::new(other_key).unwrap();
+        assert!(matches!(
+            request.decapsulate(&other_server),
+            Err(Error::KeyId)
+        ));
+        assert_eq!(request.enc().unwrap(), enc);
+
+        let (_, response_write) = Pipe::new();
+        assert!(matches!(
+            request.response(response_write),
+            Err(Error::NotReady)
+        ));
+        request.decapsulate(&server).unwrap();
+        assert!(matches!(request.decapsulate(&server), Err(Error::NotReady)));
+        assert_eq!(request.sync_read_to_end(), REQUEST);
+
+        let (mut response_read, response_write) = Pipe::new();
+        let mut response = request.response(response_write).unwrap();
+        response.write_all(RESPONSE).sync_resolve().unwrap();
+        response.close().sync_resolve().unwrap();
+        let enc_response = response_read.sync_read_to_end();
+        assert_eq!(
+            client_request
+                .response(&enc_response[..])
+                .unwrap()
+                .sync_read_to_end(),
+            RESPONSE
+        );
+        assert_eq!(request.enc().unwrap(), enc.as_slice());
+    }
+
+    #[test]
+    fn staged_body_authentication_failure_retains_header_and_enc() {
+        init();
+
+        let server = Server::new(make_config()).unwrap();
+        let (mut enc_request, _) = stream_request(&server);
+        *enc_request.last_mut().unwrap() ^= 1;
+        let mut decode_header = Box::pin(Server::decode_header_stream(&enc_request[..]));
+        let mut request = decode_header.sync_resolve().unwrap();
+        let header = *request.header().unwrap();
+        let enc = {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            decode_enc.sync_resolve().unwrap().to_vec()
+        };
+        request.decapsulate(&server).unwrap();
+
+        let mut body = Vec::new();
+        {
+            let mut read_body = Box::pin(request.read_to_end(&mut body));
+            assert!(read_body.sync_resolve().is_err());
+        }
+        assert_eq!(request.header(), Some(&header));
+        assert_eq!(request.enc().unwrap(), enc.as_slice());
+    }
+
+    #[test]
+    fn staged_stream_rejects_incomplete_header_and_enc() {
+        let header = [1, 0, 32, 0, 1, 0, 1];
+        let mut decode_header = Box::pin(Server::decode_header_stream(&header[..6]));
+        assert!(matches!(
+            decode_header.sync_resolve(),
+            Err(Error::Truncated)
+        ));
+
+        let mut input = header.to_vec();
+        input.resize(7 + 31, 0);
+        let mut decode_header = Box::pin(Server::decode_header_stream(&input[..]));
+        let mut request = decode_header.sync_resolve().unwrap();
+        let header = *request.header().unwrap();
+        {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            assert!(matches!(decode_enc.sync_resolve(), Err(Error::Truncated)));
+        }
+        assert_eq!(request.header(), Some(&header));
+        assert!(matches!(request.enc(), Err(Error::NotReady)));
+    }
+
+    #[test]
+    fn pinned_sources_support_staged_and_lazy_decapsulation() {
+        init();
+        let server = Server::new(make_config()).unwrap();
+        let (enc_request, _) = stream_request(&server);
+        let source = futures::TryStreamExt::into_async_read(futures::stream::once(async {
+            Ok::<_, std::io::Error>(&enc_request[..])
+        }));
+        let mut decode_header = Box::pin(Server::decode_header_stream(Box::pin(source)));
+        let mut request = decode_header.sync_resolve().unwrap();
+        {
+            let mut decode_enc = Box::pin(request.decode_enc());
+            decode_enc.sync_resolve().unwrap();
+        }
+        request.decapsulate(&server).unwrap();
+        assert_eq!(request.sync_read_to_end(), REQUEST);
+
+        let source = futures::TryStreamExt::into_async_read(futures::stream::once(async {
+            Ok::<_, std::io::Error>(&enc_request[..])
+        }));
+        let mut request = Box::pin(server.decapsulate_stream(source));
+        assert_eq!(request.sync_read_to_end(), REQUEST);
+    }
 
     #[test]
     fn request_response() {
