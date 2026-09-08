@@ -178,6 +178,9 @@ mod nss {
             "ghash-aes-x86_c_lib",
             "ghash-aes-arm32-neon_c_lib",
             "ghash-aes-aarch64_c_lib",
+            // NSS 3.129 adds new libraries
+            "pqcwrap_static",
+            "crux",
         ];
 
         // Build rules are complex, so simply check the lib directory to see if
@@ -185,12 +188,10 @@ mod nss {
         // include. Check different variations of the filename to handle
         // platform differences.
         for libname in accel_libs {
-            let filename = if env::consts::OS == "windows" {
-                format!("{libname}.lib")
-            } else {
-                format!("lib{libname}.a")
-            };
-            if nsslibdir.join(filename).is_file() {
+            if [format!("{libname}.lib"), format!("lib{libname}.a")]
+                .iter()
+                .any(|f| nsslibdir.join(f).is_file())
+            {
                 static_libs.push(libname);
             }
         }
