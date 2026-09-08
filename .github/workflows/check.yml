@@ -14,6 +14,7 @@ jobs:
     env:
       NSS_DIR: ${{ github.workspace }}/nss
       CARGO_TERM_COLOR: always
+      CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
       RUST_BACKTRACE: 1
     strategy:
       fail-fast: false
