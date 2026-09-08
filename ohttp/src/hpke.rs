@@ -8,7 +8,7 @@ macro_rules! convert_enum {
             $($(#[$vmeta])* $vname $(= $val)?,)*
         }
 
-        impl std::convert::TryFrom<u16> for $name {
+        impl ::std::convert::TryFrom<u16> for $name {
             type Error = crate::Error;
 
             fn try_from(v: u16) -> Result<Self, Self::Error> {
@@ -21,7 +21,7 @@ macro_rules! convert_enum {
             }
         }
 
-        impl std::convert::From<$name> for u16 {
+        impl ::std::convert::From<$name> for u16 {
             fn from(v: $name) -> u16 {
                 v as u16
             }
@@ -103,4 +103,8 @@ impl Aead {
     pub fn n_t(self) -> usize {
         16
     }
+}
+
+pub trait Exporter {
+    fn export(&self, info: &[u8], len: usize) -> crate::err::Res<crate::SymKey>;
 }

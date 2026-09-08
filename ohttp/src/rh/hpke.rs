@@ -16,7 +16,7 @@ use super::SymKey;
 use crate::{
     Error, Res,
     crypto::{Decrypt, Encrypt},
-    hpke::{Aead, Kdf, Kem},
+    hpke::{Aead, Exporter, Kdf, Kem},
 };
 
 /// Configuration for `Hpke`.
@@ -321,10 +321,6 @@ hpke_contexts! {
     { P521ChaCha, Kem::P521Sha512, DhP521HkdfSha512, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::P521, PrivateKey::P521 },
     { XWingAes128, Kem::XWing, XWing, Aead::Aes128Gcm, AesGcm128, PublicKey::XWing, PrivateKey::XWing },
     { XWingChaCha, Kem::XWing, XWing, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::XWing, PrivateKey::XWing },
-}
-
-pub trait Exporter {
-    fn export(&self, info: &[u8], len: usize) -> Res<SymKey>;
 }
 
 #[allow(clippy::module_name_repetitions)]

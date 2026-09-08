@@ -36,7 +36,7 @@ use crate::nss::{
     PublicKey, SymKey,
     aead::{Aead, Mode, NONCE_LEN},
     hkdf::{Hkdf, KeyMechanism},
-    hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS},
+    hpke::{Config as HpkeConfig, HpkeR, HpkeS},
     random,
 };
 #[cfg(feature = "stream")]
@@ -44,6 +44,7 @@ use crate::stream::{ClientRequest as StreamClient, ServerRequest as ServerReques
 pub use crate::{
     config::{KeyConfig, SymmetricSuite},
     err::Error,
+    hpke::Exporter,
 };
 use crate::{err::Res, hpke::Aead as AeadId};
 #[cfg(feature = "rust-hpke")]
@@ -53,7 +54,7 @@ use crate::{
         SymKey,
         aead::{Aead, Mode, NONCE_LEN},
         hkdf::{Hkdf, KeyMechanism},
-        hpke::{Config as HpkeConfig, Exporter, HpkeR, HpkeS, PublicKey},
+        hpke::{Config as HpkeConfig, HpkeR, HpkeS, PublicKey},
     },
 };
 
@@ -69,7 +70,7 @@ pub type KeyId = u8;
 
 pub fn init() {
     #[cfg(feature = "nss")]
-    nss::init();
+    nss::init().expect("nss initialization error");
 }
 
 /// Construct the info parameter we use to initialize an `HpkeS` instance.
@@ -329,6 +330,7 @@ mod test {
 
     use log::trace;
 
+    use super::HpkeConfig;
     use crate::{
         ClientRequest, Error, KeyConfig, KeyId, Server,
         config::SymmetricSuite,
@@ -388,7 +390,7 @@ mod test {
         init();
 
         // P-256 HPKE may not be supported by all backends (e.g., NSS lacks P-256 HPKE).
-        if !super::HpkeConfig::new(Kem::P256Sha256, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+        if !HpkeConfig::new(Kem::P256Sha256, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
             return;
         }
 
@@ -414,7 +416,7 @@ mod test {
         init();
 
         // P-384 HPKE is only available with the rust-hpke backend.
-        if !super::HpkeConfig::new(Kem::P384Sha384, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+        if !HpkeConfig::new(Kem::P384Sha384, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
             return;
         }
 
@@ -440,7 +442,7 @@ mod test {
         init();
 
         // P-521 HPKE is only available with the rust-hpke backend.
-        if !super::HpkeConfig::new(Kem::P521Sha512, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+        if !HpkeConfig::new(Kem::P521Sha512, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
             return;
         }
 
@@ -466,7 +468,7 @@ mod test {
         init();
 
         // X-Wing HPKE is only available with the rust-hpke backend.
-        if !super::HpkeConfig::new(Kem::XWing, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
+        if !HpkeConfig::new(Kem::XWing, Kdf::HkdfSha256, Aead::Aes128Gcm).supported() {
             return;
         }
 

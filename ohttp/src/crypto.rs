@@ -7,7 +7,7 @@ pub trait Decrypt {
 }
 
 pub trait Encrypt {
-    fn seal(&mut self, aad: &[u8], ct: &[u8]) -> Res<Vec<u8>>;
+    fn seal(&mut self, aad: &[u8], pt: &[u8]) -> Res<Vec<u8>>;
     #[allow(dead_code)] // Used by stream feature.
     fn alg(&self) -> AeadId;
 }

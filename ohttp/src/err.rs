@@ -10,7 +10,7 @@ pub enum Error {
     ChunkTooLarge,
     #[cfg(feature = "nss")]
     #[error("a problem occurred during cryptographic processing: {0}")]
-    Crypto(#[from] crate::nss::Error),
+    Crypto(#[from] nss_rs::Error),
     #[cfg(feature = "stream")]
     #[error("a stream contained data after the last chunk")]
     ExtraData,
