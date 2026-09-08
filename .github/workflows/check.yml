@@ -6,16 +6,15 @@ on:
   pull_request:
     branches: ["main"]
     paths-ignore: ["*.md", "LICENSE-*"]
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 jobs:
   check:
-    name: Continuous Integration
+    name: Continuous Integration (${{ matrix.rust }}, ${{ matrix.hpke }}, ${{ matrix.stream.name }})
     runs-on: ubuntu-latest
     env:
       NSS_DIR: ${{ github.workspace }}/nss
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
     strategy:
       fail-fast: false
       matrix:
@@ -25,9 +24,13 @@ jobs:
         rust:
           - 1.86.0 # MSRV
           - stable
-
+        stream:
+          - name: stream-off
+            features: ""
+          - name: stream-on
+            features: ",stream"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -63,17 +66,22 @@ jobs:
       - name: Fetch NSS and NSPR
         if: matrix.hpke == 'nss'
         run: |
-          hg clone https://hg.mozilla.org/projects/nspr "$NSS_DIR"/../nspr
-          git clone --depth 1 https://github.com/nss-dev/nss "$NSS_DIR"
+          git clone --depth 1 https://github.com/mozilla/nspr "$NSS_DIR"/../nspr
+          git clone --depth 1 https://github.com/mozilla/nss "$NSS_DIR"
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust }} build --tests --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} build --tests --no-default-features --features client,server,${{ matrix.hpke }}${{ matrix.stream.features }}
 
       - name: Run Tests
         run: |
-          cargo +${{ matrix.rust }} test --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} test --no-default-features --features client,server,${{ matrix.hpke }}${{ matrix.stream.features }}
+
+      - name: Check isolated OHTTP feature sets
+        run: |
+          cargo +${{ matrix.rust }} check -p ohttp --no-default-features --features ${{ matrix.hpke }}${{ matrix.stream.features }},client
+          cargo +${{ matrix.rust }} check -p ohttp --no-default-features --features ${{ matrix.hpke }}${{ matrix.stream.features }},server
 
       - name: Check formatting
         if: ${{ success() || failure() }}
@@ -83,4 +91,4 @@ jobs:
       - name: Clippy
         if: ${{ success() || failure() }}
         run: |
-          cargo clippy --tests --no-default-features --features ${{ matrix.hpke }},client,server
+          cargo +${{ matrix.rust }} clippy --tests --no-default-features --features client,server,${{ matrix.hpke }}${{ matrix.stream.features }}
