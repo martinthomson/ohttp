@@ -4,6 +4,8 @@ pub enum Error {
     ConnectUnsupported,
     #[error("a field contained invalid Unicode: {0}")]
     CharacterEncoding(#[from] std::string::FromUtf8Error),
+    #[error("a field contained invalid Unicode: {0}")]
+    CharacterEncoding2(#[from] std::str::Utf8Error),
     #[error("read a response when expecting a request")]
     ExpectedRequest,
     #[error("read a request when expecting a response")]
@@ -37,6 +39,18 @@ pub enum Error {
     #[error("a URL could not be parsed into components: {0}")]
     #[cfg(feature = "http")]
     UrlParse(#[from] url::ParseError),
+    #[error("the status code was not supported {0}")]
+    #[cfg(feature = "http-compat")]
+    UnsportedStatusCode(u16),
+    #[error("got an unknown HTTP body frame type, only data frame and trailer frame are supported")]
+    #[cfg(feature = "http-compat")]
+    UnknownHttpBodyFrameType,
+    #[error("http error")]
+    #[cfg(feature = "http-compat")]
+    HttpError(#[from] http::Error),
+    #[error("http header value contains invalid bytes")]
+    #[cfg(feature = "http-compat")]
+    HttpHeaderValueNotString(#[from] http::header::ToStrError),
 }
 
 pub type Res<T> = Result<T, Error>;
