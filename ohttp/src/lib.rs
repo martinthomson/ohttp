@@ -18,7 +18,7 @@ mod rand;
 #[cfg(feature = "rust-hpke")]
 mod rh;
 #[cfg(feature = "stream")]
-mod stream;
+pub mod stream;
 
 use std::{
     cmp::max,
