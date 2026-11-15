@@ -2,7 +2,6 @@
 name = "sync-async"
 description = "Synchronous Helpers for Async Code"
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 version.workspace = true
 edition.workspace = true

@@ -216,7 +216,7 @@ mod test {
             let mut fut = read_varint(&mut buf_ref);
             assert_eq!(Some(v), fut.sync_resolve().unwrap());
             let s = fut.stream();
-            assert!(s.is_empty());
+            assert_eq!(*s, []);
         }
     }
 

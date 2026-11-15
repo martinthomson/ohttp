@@ -858,7 +858,7 @@ impl Message {
             }
             let mut buf = vec![0; count];
             r.borrow_mut().read_exact(&mut buf)?;
-            assert!(read_line(r)?.is_empty());
+            assert_eq!(read_line(r)?, [] as [u8; 0]);
             content.append(&mut buf);
         }
     }
