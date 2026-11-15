@@ -26,9 +26,9 @@ unsafe-print-secrets = []
 
 [dependencies]
 aead = {version = "0.6", optional = true, features = ["alloc"]}
-aes-gcm = {version = "0.11", optional = true}
+aes-gcm = {version = "0.11", optional = true, features = ["zeroize"]}
 byteorder = "1.4"
-chacha20poly1305 = {version = "0.11", optional = true}
+chacha20poly1305 = {version = "0.11", optional = true, features = ["zeroize"]}
 futures = {version = "0.3", optional = true}
 hex = "0.4"
 hkdf = {version = "0.13", optional = true}
