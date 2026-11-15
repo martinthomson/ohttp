@@ -3,19 +3,33 @@
 use std::{
     io::Cursor,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use bhttp::{Message, Mode, StatusCode};
+use futures_util::stream::StreamExt;
 use ohttp::{
     KeyConfig, Server as OhttpServer, SymmetricSuite,
     hpke::{Aead, Kdf, Kem},
 };
+use rustls::ServerConfig;
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use structopt::StructOpt;
+use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
+use tokio_stream::wrappers::TcpListenerStream;
 use warp::Filter;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+fn load_tls_config(cert_path: &Path, key_path: &Path) -> Res<ServerConfig> {
+    let certs = CertificateDer::pem_file_iter(cert_path)?.collect::<Result<Vec<_>, _>>()?;
+    let key = PrivateKeyDer::from_pem_file(key_path)?;
+    Ok(ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?)
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ohttp-server", about = "Serve oblivious HTTP requests.")]
@@ -126,12 +140,27 @@ async fn main() -> Res<()> {
         .and(with_ohttp(Arc::new(Mutex::new(ohttp))))
         .and(warp::any().map(move || mode))
         .and_then(serve);
-    warp::serve(filter)
-        .tls()
-        .cert_path(args.certificate)
-        .key_path(args.key)
-        .run(args.address)
-        .await;
+
+    let tls_config = Arc::new(load_tls_config(&args.certificate, &args.key)?);
+    let acceptor = TlsAcceptor::from(tls_config);
+    let listener = TcpListener::bind(args.address).await?;
+    let incoming = TcpListenerStream::new(listener).filter_map(move |conn| {
+        let acceptor = acceptor.clone();
+        async move {
+            match conn {
+                Ok(stream) => match acceptor.accept(stream).await {
+                    Ok(tls) => Some(Ok(tls)),
+                    Err(e) => {
+                        eprintln!("TLS handshake failed: {e}");
+                        None
+                    }
+                },
+                Err(e) => Some(Err(e)),
+            }
+        }
+    });
+
+    warp::serve(filter).serve_incoming(incoming).await;
 
     Ok(())
 }
