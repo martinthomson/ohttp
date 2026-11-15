@@ -384,6 +384,8 @@ mod test {
     }
 
     #[test]
+    // NSS reports that it supports this KEM, but can't generate keys for it.
+    #[cfg_attr(feature = "nss", should_panic(expected = "X25519Sha256"))]
     fn request_response_p256() {
         init();
 
@@ -410,6 +412,8 @@ mod test {
     }
 
     #[test]
+    // NSS reports that it supports this KEM, but can't generate keys for it.
+    #[cfg_attr(feature = "nss", should_panic(expected = "X25519Sha256"))]
     fn request_response_p384() {
         init();
 
