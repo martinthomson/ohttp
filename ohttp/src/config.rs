@@ -67,7 +67,7 @@ impl KeyConfig {
     /// If the configurations don't include a supported configuration.
     pub fn new(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
         Self::strip_unsupported(&mut symmetric, kem);
-        assert!(!symmetric.is_empty());
+        assert_ne!(symmetric.len(), 0);
         let (sk, pk) = generate_key_pair(kem)?;
         Ok(Self {
             key_id,
@@ -93,7 +93,7 @@ impl KeyConfig {
         #[cfg(feature = "rust-hpke")]
         {
             Self::strip_unsupported(&mut symmetric, kem);
-            assert!(!symmetric.is_empty());
+            assert_ne!(symmetric.len(), 0);
             let (sk, pk) = derive_key_pair(kem, ikm)?;
             return Ok(Self {
                 key_id,

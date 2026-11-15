@@ -22,7 +22,7 @@ jobs:
           - nss
           - rust-hpke
         rust:
-          - 1.86.0 # MSRV
+          - 1.87.0 # MSRV
           - stable
         stream:
           - name: stream-off
