@@ -8,6 +8,8 @@ pub mod aead;
 pub mod hkdf;
 pub mod hpke;
 
+use zeroize::Zeroize;
+
 use crate::err::Res;
 
 pub struct SymKey(Vec<u8>);
@@ -16,6 +18,12 @@ impl SymKey {
     #[allow(clippy::unnecessary_wraps)]
     pub fn key_data(&self) -> Res<&[u8]> {
         Ok(&self.0)
+    }
+}
+
+impl Drop for SymKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
     }
 }
 
