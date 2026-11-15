@@ -217,6 +217,21 @@ mod nss {
 
         static_libs.extend_from_slice(&["nsspki", "nssdev", "nssb", "certhi", "certdb", "nssutil"]);
 
+        for lib in &static_libs {
+            println!("cargo:rustc-link-lib=static={lib}");
+        }
+        // The NSS libraries depend on each other cyclically (e.g., pk11wrap needs cryptohi and
+        // nss_static, which need pk11wrap), so linkers that only scan each archive once (GNU ld)
+        // need them listed again.  rustc has no stable way to emit --start-group/--end-group
+        // and it drops duplicates, so name the files directly the second time.
+        // MSVC's linker doesn't care about ordering.
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+            for lib in &static_libs {
+                println!("cargo:rustc-link-lib=static:+verbatim=lib{lib}.a");
+            }
+        }
+        static_libs.clear();
+
         if use_static_nspr {
             static_libs.append(&mut nspr_libs());
         } else {
