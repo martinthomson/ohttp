@@ -473,7 +473,7 @@ mod test {
             assert_eq!(hdr.len(), 3);
 
             let body = pin!(msg.body().unwrap()).sync_read_to_end();
-            assert!(body.is_empty());
+            assert_eq!(body, [] as [u8; 0]);
 
             let trailer = pin!(msg.trailer()).sync_resolve().unwrap();
             assert!(trailer.is_empty());

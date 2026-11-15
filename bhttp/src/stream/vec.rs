@@ -150,7 +150,7 @@ mod test {
                 assert_eq!(len, out.len());
                 assert!(out.iter().all(|&v| v == FILL_VALUE));
 
-                assert!(fut.stream().is_empty());
+                assert_eq!(*fut.stream(), []);
             }
         }
     }

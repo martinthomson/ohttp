@@ -11,10 +11,8 @@ members = [
 ]
 
 [workspace.package]
-homepage = "https://github.com/martinthomson/ohttp"
 repository = "https://github.com/martinthomson/ohttp"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
-description = "Oblivious HTTP"
 keywords = ["ohttp", "http", "bhttp", "ietf"]
 categories = ["network-programming", "web-programming", "security"]
 readme = "README.md"
