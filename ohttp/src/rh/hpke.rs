@@ -162,10 +162,10 @@ impl std::fmt::Debug for PublicKey {
 
 impl std::fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if cfg!(feature = "unsafe-print-secrets") {
-            if let Ok(b) = self.key_data() {
-                return write!(f, "PrivateKey {}", hex::encode(b));
-            }
+        if cfg!(feature = "unsafe-print-secrets")
+            && let Ok(b) = self.key_data()
+        {
+            return write!(f, "PrivateKey {}", hex::encode(b));
         }
         write!(f, "Opaque PrivateKey")
     }
