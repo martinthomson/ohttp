@@ -53,7 +53,7 @@ impl AsyncReadFieldSection for FieldSection {
         let fields = if mode == Mode::KnownLength {
             // Known-length fields can just be read into a buffer.
             if let Some(buf) = read_vec(&mut src).await? {
-                Self::read_bhttp_fields(false, &mut Cursor::new(&buf[..]))?
+                Self::read_bhttp_fields(mode, &mut Cursor::new(&buf[..]))?
             } else {
                 Vec::new()
             }
@@ -498,6 +498,28 @@ mod test {
         // Use this test to test skipping a few things.
         let err = pin!(msg.header()).sync_resolve().unwrap_err();
         assert!(matches!(err, Error::Truncated));
+    }
+
+    #[test]
+    fn control_only() {
+        const REQUEST: &[u8] = &[
+            0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78,
+            0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x01, 0x2f,
+        ];
+        let mut buf = &REQUEST[..];
+        let mut msg = Message::async_read(&mut buf);
+        let hdr = pin!(msg.header()).sync_resolve().unwrap();
+        assert_eq!(hdr.control().method().unwrap(), b"GET");
+        assert_eq!(hdr.control().scheme().unwrap(), b"https");
+        assert_eq!(hdr.control().authority().unwrap(), b"example.com");
+        assert_eq!(hdr.control().path().unwrap(), b"/");
+        assert!(hdr.control().status().is_none());
+        assert!(hdr.is_empty());
+
+        let mut body = pin!(msg.body().unwrap());
+        assert_eq!(body.sync_read_to_end(), b"");
+        let trailer = pin!(msg.trailer()).sync_resolve().unwrap();
+        assert!(trailer.is_empty());
     }
 
     /// This test is crazy.  It reads a byte at a time and checks the state constantly.
