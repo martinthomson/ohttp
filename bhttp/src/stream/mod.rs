@@ -506,8 +506,10 @@ mod test {
             0x00, 0x03, 0x47, 0x45, 0x54, 0x05, 0x68, 0x74, 0x74, 0x70, 0x73, 0x0b, 0x65, 0x78,
             0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x01, 0x2f,
         ];
-        let mut buf = &REQUEST[..];
+
+        let mut buf = REQUEST;
         let mut msg = Message::async_read(&mut buf);
+
         let hdr = pin!(msg.header()).sync_resolve().unwrap();
         assert_eq!(hdr.control().method().unwrap(), b"GET");
         assert_eq!(hdr.control().scheme().unwrap(), b"https");
