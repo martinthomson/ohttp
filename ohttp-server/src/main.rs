@@ -14,7 +14,7 @@ use ohttp::{
     hpke::{Aead, Kdf, Kem},
 };
 use rustls::ServerConfig;
-use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use structopt::StructOpt;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
