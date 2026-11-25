@@ -311,7 +311,7 @@ impl FieldSection {
         }
     }
 
-    fn read_bhttp_fields<T, R>(terminator: bool, r: &mut T) -> Res<Vec<Field>>
+    fn read_bhttp_fields<T, R>(mode: Mode, r: &mut T) -> Res<Vec<Field>>
     where
         T: BorrowMut<R> + ?Sized,
         R: ReadSeek + ?Sized,
@@ -322,7 +322,7 @@ impl FieldSection {
         loop {
             if let Some(n) = read_vec(r)? {
                 if n.is_empty() {
-                    if terminator {
+                    if mode == Mode::IndeterminateLength {
                         return Ok(fields);
                     }
                     return Err(Error::Truncated);
@@ -337,10 +337,10 @@ impl FieldSection {
                     cookie_index = Some(fields.len());
                 }
                 fields.push(Field::new(n, v));
-            } else if terminator {
-                return Err(Error::Truncated);
-            } else {
+            } else if fields.is_empty() || mode == Mode::KnownLength {
                 return Ok(fields);
+            } else {
+                return Err(Error::Truncated);
             }
         }
     }
@@ -352,12 +352,13 @@ impl FieldSection {
     {
         let fields = if mode == Mode::KnownLength {
             if let Some(buf) = read_vec(r)? {
-                Self::read_bhttp_fields(false, &mut io::Cursor::new(&buf[..]))?
+                let mut c = io::Cursor::new(&buf[..]);
+                Self::read_bhttp_fields(mode, &mut c)?
             } else {
                 Vec::new()
             }
         } else {
-            Self::read_bhttp_fields(true, r)?
+            Self::read_bhttp_fields(mode, r)?
         };
         Ok(Self(fields))
     }
@@ -969,7 +970,7 @@ impl Message {
         let mut content = read_vec(r)?.unwrap_or_default();
         if mode == Mode::IndeterminateLength && !content.is_empty() {
             loop {
-                let mut extra = read_vec(r)?.unwrap_or_default();
+                let mut extra = read_vec(r)?.ok_or(Error::Truncated)?;
                 if extra.is_empty() {
                     break;
                 }
