@@ -2,7 +2,7 @@
 
 use std::{
     cmp::min,
-    io::{Cursor, Error as IoError, Result as IoResult},
+    io::{Cursor, Error as IoError, ErrorKind, Result as IoResult},
     mem,
     pin::Pin,
     task::{Context, Poll},
@@ -16,7 +16,7 @@ use crate::{
     SymKey, build_info,
     crypto::{Decrypt, Encrypt},
     entropy,
-    err::Res,
+    err::{Res, duplicate_io},
     export_secret, make_aead, random,
 };
 
@@ -28,6 +28,9 @@ pub(crate) const LABEL_RESPONSE: &[u8] = b"message/bhttp chunked response";
 const MAX_CHUNK_PLAINTEXT: usize = 1 << 14;
 const CHUNK_AAD: &[u8] = b"";
 const FINAL_CHUNK_AAD: &[u8] = b"final";
+/// The largest response nonce, `max(Nn, Nk)`, over all supported AEADs.
+/// AES-256-GCM and ChaCha20-Poly1305 have `Nk = 32`.
+const MAX_ENTROPY: usize = 32;
 
 #[allow(clippy::unnecessary_wraps)]
 fn ioerror<T, E>(e: E) -> Poll<IoResult<T>>
@@ -149,6 +152,10 @@ impl<D: AsyncWrite, C: Encrypt> AsyncWrite for ChunkWriter<D, C> {
         if *this.closed {
             return ioerror(Error::WriteAfterClose);
         }
+        // A zero-length non-final chunk is forbidden, so an empty write is a no-op.
+        if input.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
 
         // We have buffered data, so dump it into the output directly.
         let flushed = Self::flush(&mut this, cx);
@@ -241,7 +248,7 @@ impl<D> ClientRequest<D> {
             state: ClientResponseState::Header {
                 enc,
                 secret,
-                nonce: [0; 16],
+                nonce: [0; MAX_ENTROPY],
                 read: 0,
             },
         })
@@ -267,21 +274,25 @@ impl<D: AsyncWrite> AsyncWrite for ClientRequest<D> {
 }
 
 enum ChunkReader {
-    Length {
-        len: [u8; 8],
-        offset: usize,
-    },
+    /// Part-way through reading a length field.
+    Length { len: [u8; 8], offset: usize },
+    /// A chunk of encrypted data is incomplete and being buffered.
     EncryptedData {
         buf: Vec<u8>,
         offset: usize,
         length: usize,
     },
+    /// The reader has not finished reading cleartext data.
     CleartextData {
         buf: Vec<u8>,
         offset: usize,
         last: bool,
     },
+    /// The end of the stream has been delivered.
     Done,
+    /// The stream is broken and cannot be resumed, so every read
+    /// returns a copy of the error that broke it.
+    Broken(IoError),
 }
 
 impl ChunkReader {
@@ -420,6 +431,10 @@ impl ChunkReader {
                         Ok(pt) => pt,
                         Err(e) => return Some(ioerror(e)),
                     };
+                    if pt.is_empty() {
+                        // A zero-length non-final chunk is treated as a decryption error.
+                        return Some(ioerror(Error::EmptyChunk));
+                    }
                     output[..pt.len()].copy_from_slice(&pt);
                     *self = Self::length();
                     Some(Poll::Ready(Ok(pt.len())))
@@ -464,7 +479,36 @@ impl ChunkReader {
         }
     }
 
+    /// Read from the stream.
+    ///
+    /// Any error leaves the reader in an inconsistent state:
+    /// data might have been consumed from `src` or the AEAD might have advanced.
+    /// So, after an error, every subsequent read returns a copy of that error.
+    /// The exception is an I/O error from `src` of a kind that indicates
+    /// that the read can be retried; the reader consumes nothing in that case.
     fn read<S: AsyncRead, C: Decrypt>(
+        &mut self,
+        src: Pin<&mut S>,
+        cx: &mut Context<'_>,
+        cipher: &mut C,
+        output: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        if let Self::Broken(e) = self {
+            return Poll::Ready(Err(duplicate_io(e)));
+        }
+        let res = self.read_chunks(src, cx, cipher, output);
+        if let Poll::Ready(Err(e)) = &res
+            && !matches!(
+                e.kind(),
+                ErrorKind::Interrupted | ErrorKind::WouldBlock | ErrorKind::TimedOut
+            )
+        {
+            *self = Self::Broken(duplicate_io(e));
+        }
+        res
+    }
+
+    fn read_chunks<S: AsyncRead, C: Decrypt>(
         &mut self,
         mut src: Pin<&mut S>,
         cx: &mut Context<'_>,
@@ -536,16 +580,15 @@ impl ChunkReader {
                 };
                 output.len()
             } else {
+                if !last && pt.is_empty() {
+                    // A zero-length non-final chunk is treated as a decryption error.
+                    return ioerror(Error::EmptyChunk);
+                }
                 output[..pt.len()].copy_from_slice(&pt);
                 if last {
                     *self = Self::Done;
                 } else {
                     *self = Self::length();
-                    if pt.is_empty() {
-                        // We can't return zero length, as that means "end of stream".
-                        // So read the next chunk if this one was empty.
-                        continue;
-                    }
                 }
                 pt.len()
             };
@@ -740,7 +783,7 @@ enum ClientResponseState {
     Header {
         enc: Vec<u8>,
         secret: SymKey,
-        nonce: [u8; 16],
+        nonce: [u8; MAX_ENTROPY],
         read: usize,
     },
     Body {
@@ -813,19 +856,25 @@ impl<S: AsyncRead> AsyncRead for ClientResponse<S> {
 #[cfg(test)]
 mod test {
     use std::{
-        io::Result as IoResult,
+        io::{Error as IoError, ErrorKind, Result as IoResult},
+        mem::discriminant,
         pin::Pin,
         task::{Context, Poll},
     };
 
-    use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+    use futures::{
+        AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+        io::{ReadHalf, WriteHalf},
+    };
     use log::trace;
     use pin_project::pin_project;
     use sync_async::{Dribble, Pipe, SplitAt, Stutter, SyncRead, SyncResolve, Unadapt};
 
+    use super::ChunkWriter;
     use crate::{
-        ClientRequest, Server,
-        test::{REQUEST, RESPONSE, init, make_config},
+        ClientRequest, Error, KeyConfig, Server, SymmetricSuite,
+        hpke::{Aead, Kdf, Kem},
+        test::{KEY_ID, REQUEST, RESPONSE, init, make_config},
     };
 
     #[test]
@@ -1105,5 +1154,236 @@ mod test {
         trace!("Encapsulated Request: {}", hex::encode(&enc_request)); // The server receives a request.
         let mut server_request = server.decapsulate_stream(&enc_request[..]);
         assert_eq!(server_request.sync_read_to_end(), LONG_REQUEST);
+    }
+
+    /// Perform a request, returning the server and client response handles.
+    fn exchange(
+        config: KeyConfig,
+    ) -> (
+        super::ServerResponse<WriteHalf<Pipe>>,
+        ReadHalf<Pipe>,
+        super::ClientRequest<WriteHalf<Pipe>>,
+    ) {
+        let server = Server::new(config).unwrap();
+        let encoded_config = server.config().encode().unwrap();
+        let client = ClientRequest::from_encoded_config(&encoded_config).unwrap();
+        let (mut request_read, request_write) = Pipe::new();
+        let mut client_request = client.encapsulate_stream(request_write).unwrap();
+        client_request.write_all(REQUEST).sync_resolve().unwrap();
+        client_request.close().sync_resolve().unwrap();
+        let enc_request = request_read.sync_read_to_end();
+
+        let mut server_request = server.decapsulate_stream(&enc_request[..]);
+        assert_eq!(server_request.sync_read_to_end(), REQUEST);
+        let (response_read, response_write) = Pipe::new();
+        let server_response = server_request.response(response_write).unwrap();
+        (server_response, response_read, client_request)
+    }
+
+    /// Test all the AEAD variants.
+    /// ChaCha20-Poly1305 has a 32-byte response nonce, which is larger than
+    /// the nonce for AES-128-GCM.
+    #[test]
+    fn all_aeads() {
+        init();
+
+        for aead in [Aead::Aes128Gcm, Aead::Aes256Gcm, Aead::ChaCha20Poly1305] {
+            let config = KeyConfig::new(
+                KEY_ID,
+                Kem::X25519Sha256,
+                vec![SymmetricSuite::new(Kdf::HkdfSha256, aead)],
+            )
+            .unwrap();
+            let (mut server_response, mut response_read, client_request) = exchange(config);
+            server_response.write_all(RESPONSE).sync_resolve().unwrap();
+            server_response.close().sync_resolve().unwrap();
+            let enc_response = response_read.sync_read_to_end();
+
+            let mut client_response = client_request.response(&enc_response[..]).unwrap();
+            assert_eq!(client_response.sync_read_to_end(), RESPONSE);
+        }
+    }
+
+    /// Writing an empty buffer does not produce a chunk.
+    #[test]
+    fn empty_write() {
+        init();
+        let (mut server_response, mut response_read, client_request) = exchange(make_config());
+        assert_eq!(server_response.write(&[]).sync_resolve().unwrap(), 0);
+        server_response.write_all(b"one").sync_resolve().unwrap();
+        assert_eq!(server_response.write(&[]).sync_resolve().unwrap(), 0);
+        server_response.write_all(b"two").sync_resolve().unwrap();
+        server_response.close().sync_resolve().unwrap();
+        let enc_response = response_read.sync_read_to_end();
+
+        let mut client_response = client_request.response(&enc_response[..]).unwrap();
+        assert_eq!(client_response.sync_read_to_end(), b"onetwo");
+    }
+
+    /// Build a response that includes a zero-length non-final chunk.
+    fn empty_chunk_response() -> (Vec<u8>, super::ClientRequest<WriteHalf<Pipe>>) {
+        let (mut server_response, mut response_read, client_request) = exchange(make_config());
+        server_response.write_all(b"one").sync_resolve().unwrap();
+        // Bypass the check in `poll_write` to produce an empty non-final chunk.
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        let mut writer = Pin::new(&mut server_response.writer).project();
+        ChunkWriter::write_chunk(&mut writer, &mut cx, &[], false).unwrap();
+        server_response.write_all(b"two").sync_resolve().unwrap();
+        server_response.close().sync_resolve().unwrap();
+        (response_read.sync_read_to_end(), client_request)
+    }
+
+    /// A zero-length non-final chunk is rejected when reading directly
+    /// into a large output buffer.
+    #[test]
+    fn empty_chunk_large_read() {
+        init();
+        let (enc_response, client_request) = empty_chunk_response();
+        let mut client_response = client_request.response(&enc_response[..]).unwrap();
+        let mut buf = [0; 1024];
+        let n = client_response.read(&mut buf).sync_resolve().unwrap();
+        assert_eq!(&buf[..n], b"one");
+        for _ in 0..2 {
+            let err = client_response.read(&mut buf).sync_resolve().unwrap_err();
+            assert!(matches!(
+                err.get_ref().and_then(|e| e.downcast_ref::<Error>()),
+                Some(Error::EmptyChunk)
+            ));
+        }
+    }
+
+    /// A zero-length non-final chunk is rejected when reading through
+    /// the internal buffer.
+    #[test]
+    fn empty_chunk_small_read() {
+        init();
+        let (enc_response, client_request) = empty_chunk_response();
+        let mut client_response = client_request.response(&enc_response[..]).unwrap();
+        let mut buf = [0; 1];
+        let mut received = Vec::new();
+        let err = loop {
+            match client_response.read(&mut buf).sync_resolve() {
+                Ok(0) => panic!("stream ended without error"),
+                Ok(n) => received.extend_from_slice(&buf[..n]),
+                Err(e) => break e,
+            }
+        };
+        assert_eq!(received, b"one");
+        assert!(matches!(
+            err.get_ref().and_then(|e| e.downcast_ref::<Error>()),
+            Some(Error::EmptyChunk)
+        ));
+        // Subsequent reads fail the same way.
+        let err = client_response.read(&mut buf).sync_resolve().unwrap_err();
+        assert!(matches!(
+            err.get_ref().and_then(|e| e.downcast_ref::<Error>()),
+            Some(Error::EmptyChunk)
+        ));
+    }
+    /// Read from `client_response` until an error, returning that error.
+    fn read_until_error<S: AsyncRead + Unpin>(
+        client_response: &mut super::ClientResponse<S>,
+        buf: &mut [u8],
+    ) -> IoError {
+        loop {
+            match client_response.read(buf).sync_resolve() {
+                Ok(0) => panic!("stream ended without error"),
+                Ok(_) => {}
+                Err(e) => break e,
+            }
+        }
+    }
+
+    /// Check that two errors are the same `Error`.
+    fn assert_same_error(a: &IoError, b: &IoError) {
+        let a = a.get_ref().and_then(|e| e.downcast_ref::<Error>()).unwrap();
+        let b = b.get_ref().and_then(|e| e.downcast_ref::<Error>()).unwrap();
+        assert_eq!(discriminant(a), discriminant(b));
+    }
+
+    /// After a chunk fails to decrypt, every subsequent read fails the same way.
+    /// Test with both a small buffer, which uses the internal buffer,
+    /// and with a large one, which decrypts directly into the output.
+    #[test]
+    fn corrupt_chunk_repeats_error() {
+        init();
+        for buf_len in [1, 4096] {
+            let (mut server_response, mut response_read, client_request) = exchange(make_config());
+            server_response
+                .write_all(&[7; 1000])
+                .sync_resolve()
+                .unwrap();
+            server_response.write_all(b"more").sync_resolve().unwrap();
+            server_response.close().sync_resolve().unwrap();
+            let mut enc_response = response_read.sync_read_to_end();
+            // Corrupt a byte in the ciphertext of the first chunk.
+            let mid = enc_response.len() / 2;
+            enc_response[mid] ^= 1;
+
+            let mut client_response = client_request.response(&enc_response[..]).unwrap();
+            let mut buf = vec![0; buf_len];
+            let first = read_until_error(&mut client_response, &mut buf);
+            for _ in 0..2 {
+                let again = client_response.read(&mut buf).sync_resolve().unwrap_err();
+                assert_same_error(&first, &again);
+            }
+        }
+    }
+
+    /// Returns `ErrorKind::Interrupted` from the `at`th call to `poll_read`.
+    #[pin_project]
+    struct Interrupt<S> {
+        #[pin]
+        s: S,
+        calls: usize,
+        at: usize,
+    }
+
+    impl<S: AsyncRead> AsyncRead for Interrupt<S> {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            let this = self.project();
+            *this.calls += 1;
+            if *this.calls == *this.at {
+                Poll::Ready(Err(ErrorKind::Interrupted.into()))
+            } else {
+                this.s.poll_read(cx, buf)
+            }
+        }
+    }
+
+    /// An interrupted read from the source does not break the stream.
+    #[test]
+    fn interrupted_read_is_retried() {
+        init();
+        let (mut server_response, mut response_read, client_request) = exchange(make_config());
+        server_response.write_all(RESPONSE).sync_resolve().unwrap();
+        server_response.close().sync_resolve().unwrap();
+        let enc_response = response_read.sync_read_to_end();
+
+        // The first call reads the response nonce, so interrupt the second,
+        // which is the first read of chunk data.
+        let src = Interrupt {
+            s: &enc_response[..],
+            calls: 0,
+            at: 2,
+        };
+        let mut client_response = client_request.response(src).unwrap();
+        let mut buf = [0; 4096];
+        let mut received = Vec::new();
+        let mut interrupted = false;
+        loop {
+            match client_response.read(&mut buf).sync_resolve() {
+                Ok(0) => break,
+                Ok(n) => received.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == ErrorKind::Interrupted => interrupted = true,
+                Err(e) => panic!("unexpected error: {e}"),
+            }
+        }
+        assert!(interrupted);
+        assert_eq!(received, RESPONSE);
     }
 }

@@ -6,7 +6,7 @@ use hpke::kem::{DhP256HkdfSha256, DhP384HkdfSha384, DhP521HkdfSha512};
 use log::trace;
 use rust_hpke::{
     Deserializable, OpModeR, OpModeS, Serializable,
-    aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, ChaCha20Poly1305},
+    aead::{AeadCtxR, AeadCtxS, AeadTag, AesGcm128, AesGcm256, ChaCha20Poly1305},
     kdf::HkdfSha256,
     kem::{Kem as KemTrait, X25519HkdfSha256, XWing},
     setup_receiver, setup_sender,
@@ -49,7 +49,10 @@ impl Config {
             self.kem,
             Kem::X25519Sha256 | Kem::P256Sha256 | Kem::P384Sha384 | Kem::P521Sha512 | Kem::XWing
         ) && self.kdf == Kdf::HkdfSha256
-            && matches!(self.aead, Aead::Aes128Gcm | Aead::ChaCha20Poly1305)
+            && matches!(
+                self.aead,
+                Aead::Aes128Gcm | Aead::Aes256Gcm | Aead::ChaCha20Poly1305
+            )
     }
 }
 
@@ -312,14 +315,19 @@ macro_rules! hpke_contexts {
 
 hpke_contexts! {
     { X25519Aes128, Kem::X25519Sha256, X25519HkdfSha256, Aead::Aes128Gcm, AesGcm128, PublicKey::X25519, PrivateKey::X25519 },
+    { X25519Aes256, Kem::X25519Sha256, X25519HkdfSha256, Aead::Aes256Gcm, AesGcm256, PublicKey::X25519, PrivateKey::X25519 },
     { X25519ChaCha, Kem::X25519Sha256, X25519HkdfSha256, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::X25519, PrivateKey::X25519 },
     { P256Aes128, Kem::P256Sha256, DhP256HkdfSha256, Aead::Aes128Gcm, AesGcm128, PublicKey::P256, PrivateKey::P256 },
+    { P256Aes256, Kem::P256Sha256, DhP256HkdfSha256, Aead::Aes256Gcm, AesGcm256, PublicKey::P256, PrivateKey::P256 },
     { P256ChaCha, Kem::P256Sha256, DhP256HkdfSha256, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::P256, PrivateKey::P256 },
     { P384Aes128, Kem::P384Sha384, DhP384HkdfSha384, Aead::Aes128Gcm, AesGcm128, PublicKey::P384, PrivateKey::P384 },
+    { P384Aes256, Kem::P384Sha384, DhP384HkdfSha384, Aead::Aes256Gcm, AesGcm256, PublicKey::P384, PrivateKey::P384 },
     { P384ChaCha, Kem::P384Sha384, DhP384HkdfSha384, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::P384, PrivateKey::P384 },
     { P521Aes128, Kem::P521Sha512, DhP521HkdfSha512, Aead::Aes128Gcm, AesGcm128, PublicKey::P521, PrivateKey::P521 },
+    { P521Aes256, Kem::P521Sha512, DhP521HkdfSha512, Aead::Aes256Gcm, AesGcm256, PublicKey::P521, PrivateKey::P521 },
     { P521ChaCha, Kem::P521Sha512, DhP521HkdfSha512, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::P521, PrivateKey::P521 },
     { XWingAes128, Kem::XWing, XWing, Aead::Aes128Gcm, AesGcm128, PublicKey::XWing, PrivateKey::XWing },
+    { XWingAes256, Kem::XWing, XWing, Aead::Aes256Gcm, AesGcm256, PublicKey::XWing, PrivateKey::XWing },
     { XWingChaCha, Kem::XWing, XWing, Aead::ChaCha20Poly1305, ChaCha20Poly1305, PublicKey::XWing, PrivateKey::XWing },
 }
 
@@ -466,6 +474,11 @@ mod test {
     }
 
     #[test]
+    fn seal_open_gcm256() {
+        seal_open(Aead::Aes256Gcm, Kem::X25519Sha256);
+    }
+
+    #[test]
     fn seal_open_chacha() {
         seal_open(Aead::ChaCha20Poly1305, Kem::X25519Sha256);
     }
@@ -473,6 +486,11 @@ mod test {
     #[test]
     fn seal_open_gcm_p256() {
         seal_open(Aead::Aes128Gcm, Kem::P256Sha256);
+    }
+
+    #[test]
+    fn seal_open_gcm256_p256() {
+        seal_open(Aead::Aes256Gcm, Kem::P256Sha256);
     }
 
     #[test]
@@ -486,6 +504,11 @@ mod test {
     }
 
     #[test]
+    fn seal_open_gcm256_p384() {
+        seal_open(Aead::Aes256Gcm, Kem::P384Sha384);
+    }
+
+    #[test]
     fn seal_open_chacha_p384() {
         seal_open(Aead::ChaCha20Poly1305, Kem::P384Sha384);
     }
@@ -496,6 +519,11 @@ mod test {
     }
 
     #[test]
+    fn seal_open_gcm256_p521() {
+        seal_open(Aead::Aes256Gcm, Kem::P521Sha512);
+    }
+
+    #[test]
     fn seal_open_chacha_p521() {
         seal_open(Aead::ChaCha20Poly1305, Kem::P521Sha512);
     }
@@ -503,6 +531,11 @@ mod test {
     #[test]
     fn seal_open_gcm_xwing() {
         seal_open(Aead::Aes128Gcm, Kem::XWing);
+    }
+
+    #[test]
+    fn seal_open_gcm256_xwing() {
+        seal_open(Aead::Aes256Gcm, Kem::XWing);
     }
 
     #[test]
