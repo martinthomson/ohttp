@@ -118,8 +118,8 @@ impl ClientRequest {
     /// from the first supported configuration.
     /// See `KeyConfig::decode_list` for the structure details.
     pub fn from_encoded_config_list(encoded_config_list: &[u8]) -> Res<Self> {
-        let mut configs = KeyConfig::decode_list(encoded_config_list)?;
-        if let Some(mut config) = configs.pop() {
+        let configs = KeyConfig::decode_list(encoded_config_list)?;
+        if let Some(mut config) = configs.into_iter().next() {
             Self::from_config(&mut config)
         } else {
             Err(Error::Unsupported)

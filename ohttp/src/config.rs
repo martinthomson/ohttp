@@ -58,16 +58,23 @@ pub struct KeyConfig {
 }
 
 impl KeyConfig {
-    fn strip_unsupported(symmetric: &mut Vec<SymmetricSuite>, kem: Kem) {
+    /// Remove unsupported symmetric suites.
+    /// Fails if none of the suites are supported.
+    fn strip_unsupported(symmetric: &mut Vec<SymmetricSuite>, kem: Kem) -> Res<()> {
         symmetric.retain(|s| HpkeConfig::new(kem, s.kdf(), s.aead()).supported());
+        if symmetric.is_empty() {
+            Err(Error::Unsupported)
+        } else {
+            Ok(())
+        }
     }
 
     /// Construct a configuration for the server side.
-    /// # Panics
-    /// If the configurations don't include a supported configuration.
+    /// # Errors
+    /// If none of the symmetric suites are supported,
+    /// or if key generation fails.
     pub fn new(key_id: u8, kem: Kem, mut symmetric: Vec<SymmetricSuite>) -> Res<Self> {
-        Self::strip_unsupported(&mut symmetric, kem);
-        assert_ne!(symmetric.len(), 0);
+        Self::strip_unsupported(&mut symmetric, kem)?;
         let (sk, pk) = generate_key_pair(kem)?;
         Ok(Self {
             key_id,
@@ -81,8 +88,10 @@ impl KeyConfig {
     /// Derive a configuration for the server side from input keying material,
     /// using the `DeriveKeyPair` functionality of the HPKE KEM defined here:
     /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-hpke-12.html#section-4>
-    /// # Panics
-    /// If the configurations don't include a supported configuration.
+    /// # Errors
+    /// If none of the symmetric suites are supported,
+    /// if key derivation fails,
+    /// or if the crypto backend does not support key derivation.
     #[allow(unused)]
     pub fn derive(
         key_id: u8,
@@ -92,8 +101,7 @@ impl KeyConfig {
     ) -> Res<Self> {
         #[cfg(feature = "rust-hpke")]
         {
-            Self::strip_unsupported(&mut symmetric, kem);
-            assert_ne!(symmetric.len(), 0);
+            Self::strip_unsupported(&mut symmetric, kem)?;
             let (sk, pk) = derive_key_pair(kem, ikm)?;
             return Ok(Self {
                 key_id,
@@ -196,9 +204,12 @@ impl KeyConfig {
         let mut sym_r = BufReader::new(&sym[..]);
         let mut symmetric = Vec::with_capacity(sym_count);
         for _ in 0..sym_count {
-            let kdf = Kdf::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
-            let aead = AeadId::try_from(sym_r.read_u16::<NetworkEndian>()?)?;
-            symmetric.push(SymmetricSuite::new(kdf, aead));
+            let kdf = Kdf::try_from(sym_r.read_u16::<NetworkEndian>()?);
+            let aead = AeadId::try_from(sym_r.read_u16::<NetworkEndian>()?);
+            // Skip any suites with unknown identifiers.
+            if let (Ok(kdf), Ok(aead)) = (kdf, aead) {
+                symmetric.push(SymmetricSuite::new(kdf, aead));
+            }
         }
 
         // Check that there was nothing extra and we are at the end of the buffer.
@@ -206,8 +217,8 @@ impl KeyConfig {
             return Err(Error::Format);
         }
 
-        Self::strip_unsupported(&mut symmetric, kem);
         let pk = HpkeR::decode_public_key(kem_config.kem(), &pk_buf)?;
+        Self::strip_unsupported(&mut symmetric, kem)?;
 
         Ok(Self {
             key_id,
@@ -387,5 +398,62 @@ mod test {
         assert_eq!(usize::from(x25519[36]), SYMMETRIC.len() * 4);
         x25519[36] = 1;
         assert!(matches!(KeyConfig::decode(&x25519), Err(Error::Format)));
+    }
+
+    #[test]
+    fn new_no_supported_suites() {
+        init();
+        let res = KeyConfig::new(KEY_ID, KEM, Vec::new());
+        assert!(matches!(res, Err(Error::Unsupported)));
+    }
+
+    #[test]
+    fn derive_no_supported_suites() {
+        init();
+        let res = KeyConfig::derive(KEY_ID, KEM, Vec::new(), &[0; 32]);
+        assert!(matches!(res, Err(Error::Unsupported)));
+    }
+
+    /// A configuration with no supported symmetric suites is rejected,
+    /// and dropped from a list.
+    /// Reserved (0x0000) suites are never supported.
+    #[test]
+    fn decode_no_supported_suites() {
+        init();
+
+        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
+            .unwrap()
+            .encode()
+            .unwrap();
+        // Replace every suite with the reserved value of 0x0000.
+        x25519[37..].fill(0);
+        assert!(matches!(
+            KeyConfig::decode(&x25519),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            crate::ClientRequest::from_encoded_config(&x25519),
+            Err(Error::Unsupported)
+        ));
+
+        let mut list = Vec::new();
+        list.extend_from_slice(&u16::try_from(x25519.len()).unwrap().to_be_bytes());
+        list.extend_from_slice(&x25519);
+        assert!(KeyConfig::decode_list(&list).unwrap().is_empty());
+    }
+
+    /// Suites with unknown identifiers are skipped.
+    #[test]
+    fn decode_unknown_suite() {
+        init();
+
+        let mut x25519 = KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))
+            .unwrap()
+            .encode()
+            .unwrap();
+        // Replace the first suite with the reserved value of 0x0000.
+        x25519[37..41].fill(0);
+        let config = KeyConfig::decode(&x25519).unwrap();
+        assert_eq!(config.symmetric, &SYMMETRIC[1..]);
     }
 }
